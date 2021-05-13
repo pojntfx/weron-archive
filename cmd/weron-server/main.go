@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -47,7 +48,7 @@ func main() {
 			for {
 				_, payload, err := remote.ReadMessage()
 				if err != nil {
-					if websocket.IsCloseError(err, websocket.CloseNoStatusReceived) {
+					if websocket.IsCloseError(err, websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure) {
 						break
 					}
 
@@ -75,7 +76,7 @@ func main() {
 				}
 
 				if err := remote.WriteMessage(websocket.TextMessage, msg); err != nil {
-					if err.Error() == websocket.ErrCloseSent.Error() {
+					if err.Error() == websocket.ErrCloseSent.Error() || strings.HasSuffix(err.Error(), "write: broken pipe") {
 						break
 					}
 
