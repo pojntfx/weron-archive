@@ -3,7 +3,7 @@ package messages
 type Application struct {
 	Message
 
-	Community string
+	Community string `json:"community"`
 }
 
 func NewApplication(community string) *Application {
@@ -11,6 +11,7 @@ func NewApplication(community string) *Application {
 		Message: Message{
 			Type: MessageTypeApplication,
 		},
+
 		Community: community,
 	}
 }
