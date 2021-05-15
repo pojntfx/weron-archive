@@ -6,11 +6,11 @@ participant C2
 
 note over C1,C2:Admission
 C1-->S:Application(community: k8s)
-S-->C1:Acknowledgement(mac?: 1:2:3:4, rejected: false)
+S-->C1:Acknowledgement(mac?: 1:2:3:4)
 C1-->S:Introduction()
 
 C2-->S:Application(community: k8s)
-S-->C2:Acknowledgement(mac?: 5:6:7:8, rejected: false)
+S-->C2:Acknowledgement(mac?: 5:6:7:8)
 C2-->S:Introduction()
 
 S-->C1:Introduction(mac?: 5:6:7:8)

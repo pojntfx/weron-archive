@@ -3,17 +3,15 @@ package messages
 type Acknowledgement struct {
 	Message
 
-	Mac      string `json:"mac"`
-	Rejected bool   `json:"rejected"`
+	Mac string `json:"mac"`
 }
 
-func NewAcknowledgement(mac string, rejected bool) *Acknowledgement {
+func NewAcknowledgement(mac string) *Acknowledgement {
 	return &Acknowledgement{
 		Message: Message{
 			Type: MessageTypeAcknowledgement,
 		},
 
-		Mac:      mac,
-		Rejected: rejected,
+		Mac: mac,
 	}
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"log"
 	"net/http"
@@ -10,10 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/pojntfx/weron/pkg/addressing"
+	"github.com/pojntfx/weron/pkg/messages"
 	"github.com/ugjka/messenger"
 )
 
-type Candidate struct {
+type Message struct {
 	Address string `json:"address"`
 	Payload []byte `json:"payload"`
 }
@@ -25,6 +26,7 @@ func main() {
 
 	upgrader := websocket.Upgrader{}
 	msgr := messenger.New(0, true)
+	addrDB := addressing.NewMACAddressDB()
 
 	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
 		remote, err := upgrader.Upgrade(rw, r, nil)
@@ -55,27 +57,41 @@ func main() {
 					panic(err)
 				}
 
-				msgr.Broadcast(Candidate{
-					Address: address,
-					Payload: payload,
-				})
+				msg := messages.Message{}
+				if err := messages.Decode(payload, &msg); err != nil {
+					panic(err)
+				}
+
+				switch msg.Type {
+				case messages.MessageTypeApplication:
+					{
+						addr, err := addrDB.AddAddress()
+						if err != nil {
+							panic(err)
+						}
+
+						resp, err := messages.Encode(messages.Acknowledgement{
+							Mac: addr,
+						})
+						if err != nil {
+							panic(err)
+						}
+
+						msgr.Broadcast(Message{
+							Address: address,
+							Payload: resp,
+						})
+					}
+				}
+
 			}
 
 			wg.Done()
 		}()
 
 		go func() {
-			for candidate := range bus {
-				if candidate.(Candidate).Address == address {
-					continue
-				}
-
-				msg, err := json.Marshal(candidate)
-				if err != nil {
-					panic(err)
-				}
-
-				if err := remote.WriteMessage(websocket.TextMessage, msg); err != nil {
+			for msg := range bus {
+				if err := remote.WriteMessage(websocket.TextMessage, msg.(Message).Payload); err != nil {
 					if err.Error() == websocket.ErrCloseSent.Error() || strings.HasSuffix(err.Error(), "write: broken pipe") {
 						break
 					}
