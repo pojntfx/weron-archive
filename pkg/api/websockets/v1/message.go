@@ -1,5 +1,5 @@
 package api
 
-type message struct {
+type Message struct {
 	Type int `json:"type"`
 }
