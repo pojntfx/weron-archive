@@ -94,7 +94,7 @@ func (n *Network) HandleExchange(community string, srcMAC string, exchange api.E
 	return wsjson.Write(context.Background(), dst, exchange)
 }
 
-func (n *Network) HandleExited(community string, srcMAC string) error {
+func (n *Network) HandleExited(community string, srcMAC string, msg string) error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
@@ -128,7 +128,13 @@ func (n *Network) HandleExited(community string, srcMAC string) error {
 	}
 
 	// Close the connection
-	if err := conn.Close(websocket.StatusNormalClosure, "resignation"); err != nil {
+	if msg == "" {
+		msg = "resignation"
+	}
+	if len(msg) >= 123 {
+		msg = msg[:122] // string max is 123
+	}
+	if err := conn.Close(websocket.StatusNormalClosure, msg); err != nil {
 		return err
 	}
 

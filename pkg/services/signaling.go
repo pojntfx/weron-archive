@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
@@ -37,13 +38,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 			log.Println("could not continue in handler:", msg)
 
 			// Handle exited; ignore the error as it might be a no-op
-			_ = network.HandleExited(community, mac)
-
-			// Close the connection; ignore the error as it might be a no-op
-			if len(msg) >= 123 {
-				msg = msg[:122] // String max is 123
-			}
-			_ = c.Close(websocket.StatusInternalError, msg)
+			_ = network.HandleExited(community, mac, msg)
 		}()
 
 		for {
@@ -67,6 +62,13 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 			switch v.Type {
 			// Admission
 			case api.TypeApplication:
+				// Prevent duplicate application
+				if community != invalidCommunity || mac != invalidMAC {
+					msg = "could not handle application: already applied"
+
+					return
+				}
+
 				// Cast to application
 				var application api.Application
 				if err := json.Unmarshal(data, &application); err != nil {
@@ -76,6 +78,17 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				}
 
 				log.Println("handling application:", application)
+
+				// Validate incoming community and MAC address
+				if _, err := net.ParseMAC(application.Mac); application.Community == invalidCommunity || application.Mac == invalidMAC || err != nil {
+					msg = "could not handle application: invalid community or MAC"
+
+					if err != nil {
+						msg += ": " + err.Error()
+					}
+
+					return
+				}
 
 				// Handle application
 				if err := network.HandleApplication(application.Community, application.Mac, c); err != nil {
@@ -135,7 +148,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				log.Printf("handling exited for community %v and MAC address %v: %v", community, mac, v)
 
 				// Handle exited
-				if err := network.HandleExited(community, mac); err != nil {
+				if err := network.HandleExited(community, mac, ""); err != nil {
 					msg = "could not handle exited: " + err.Error()
 
 					return

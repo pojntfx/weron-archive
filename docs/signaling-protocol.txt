@@ -6,34 +6,34 @@ participant C2
 
 note over C1,C2: Admission
 
-C1 --> S: Application(community: cluster1, mac: 1:2:3:3)
+C1 --> S: Application(community: cluster1, mac: 5e:ec:56:78:cf:47)
 S --> C1: Rejection()
 
-C1 --> S: Application(community: cluster1, mac: 1:2:3:4)
+C1 --> S: Application(community: cluster1, mac: 52:54:00:e2:78:01)
 S --> C1: Acceptance()
 C1 --> S: Ready()
 
-C2 --> S: Application(community: cluster1, mac: 5:6:7:8)
+C2 --> S: Application(community: cluster1, mac: b0:80:50:b4:c0:f1)
 S --> C2: Acceptance()
 C2 --> S: Ready()
 
-S --> C1: Introduction(mac: 5:6:7:8)
+S --> C1: Introduction(mac: b0:80:50:b4:c0:f1)
 
 note over C1,C2: Offer/Answer Exchange
 
-C1 --> S: Offer(mac: 5:6:7:8, payload: asdf)
-S --> C2: Offer(mac: 1:2:3:4, payload: asdf)
-C2 --> S: Answer(mac: 1:2:3:4, payload: asdf)
-S --> C1: Answer(mac: 5:6:7:8, payload: asdf)
+C1 --> S: Offer(mac: b0:80:50:b4:c0:f1, payload: asdf)
+S --> C2: Offer(mac: 52:54:00:e2:78:01, payload: asdf)
+C2 --> S: Answer(mac: 52:54:00:e2:78:01, payload: asdf)
+S --> C1: Answer(mac: b0:80:50:b4:c0:f1, payload: asdf)
 
 note over C1,C2: Candidate Exchange
 
-C1 --> S: Candidate(mac: 5:6:7:8, payload: asdf)
-S --> C2: Candidate(mac: 1:2:3:4, payload: asdf)
-C2 --> S: Candidate(mac: 1:2:3:4, payload: asdf)
-S --> C1: Candidate(mac: 5:6:7:8, payload: asdf)
+C1 --> S: Candidate(mac: b0:80:50:b4:c0:f1, payload: asdf)
+S --> C2: Candidate(mac: 52:54:00:e2:78:01, payload: asdf)
+C2 --> S: Candidate(mac: 52:54:00:e2:78:01, payload: asdf)
+S --> C1: Candidate(mac: b0:80:50:b4:c0:f1, payload: asdf)
 
 note over C1,C2: Discharge
 
 C1 --> S: Exited()
-S --> C2: Resignation(mac: 1:2:3:4)
+S --> C2: Resignation(mac: 52:54:00:e2:78:01)
