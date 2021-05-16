@@ -12,4 +12,8 @@ const (
 	TypeOffer     = "offer"
 	TypeAnswer    = "answer"
 	TypeCandidate = "candidate"
+
+	// Discharge
+	TypeExited      = "exited"
+	TypeResignation = "resignation"
 )

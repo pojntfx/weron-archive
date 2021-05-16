@@ -50,15 +50,10 @@ func (n *Network) HandleReady(community string, srcMAC string) error {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	// Check if community exists
-	comm, ok := n.communities[community]
-	if !ok {
-		return errors.New("could not access community: community doesn't exist")
-	}
-
-	// Check if src mac exists
-	if _, ok := comm[srcMAC]; !ok {
-		return errors.New("could not use MAC address: connection with MAC address doesn't exist")
+	// Check if community and MAC exist
+	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	if err != nil {
+		return err
 	}
 
 	for candidate, conn := range comm {
@@ -80,15 +75,10 @@ func (n *Network) HandleExchange(community string, srcMAC string, exchange api.E
 	n.lock.Lock()
 	defer n.lock.Unlock()
 
-	// Check if community exists
-	comm, ok := n.communities[community]
-	if !ok {
-		return errors.New("could not access community: community doesn't exist")
-	}
-
-	// Check if src mac exists
-	if _, ok := comm[srcMAC]; !ok {
-		return errors.New("could not use MAC address: connection with src MAC address doesn't exist")
+	// Check if community and MAC exist
+	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	if err != nil {
+		return err
 	}
 
 	// Get dst connection
@@ -102,4 +92,60 @@ func (n *Network) HandleExchange(community string, srcMAC string, exchange api.E
 
 	// Send exchange
 	return wsjson.Write(context.Background(), dst, exchange)
+}
+
+func (n *Network) HandleExited(community string, srcMAC string) error {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	// Check if community and MAC exist
+	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	if err != nil {
+		return err
+	}
+
+	for candidate, conn := range comm {
+		// Ignore the node which sent the exited message
+		if candidate == srcMAC {
+			continue
+		}
+
+		// Send resignation
+		if err := wsjson.Write(context.Background(), conn, api.NewResignation(srcMAC)); err != nil {
+			return err
+		}
+	}
+
+	// Get a copy of the connection
+	conn := comm[srcMAC]
+
+	// Delete the connection from the community
+	delete(comm, srcMAC)
+
+	// Delete the community if it is now empty
+	if len(comm) == 0 {
+		delete(n.communities, community)
+	}
+
+	// Close the connection
+	if err := conn.Close(websocket.StatusNormalClosure, "resignation"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (n *Network) ensureCommunityAndMAC(community, mac string) (connections, error) {
+	// Check if community exists
+	comm, ok := n.communities[community]
+	if !ok {
+		return nil, errors.New("could not access community: community doesn't exist")
+	}
+
+	// Check if src mac exists
+	if _, ok := comm[mac]; !ok {
+		return nil, errors.New("could not use MAC address: connection with MAC address doesn't exist")
+	}
+
+	return comm, nil
 }
