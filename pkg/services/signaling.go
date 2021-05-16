@@ -134,6 +134,13 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 					return
 				}
 
+				// Validate incoming MAC address
+				if _, err := net.ParseMAC(exchange.Mac); err != nil {
+					msg = "could not handle application: invalid MAC address: " + err.Error()
+
+					return
+				}
+
 				log.Printf("handling exchange for community %v and src MAC address %v: %v", community, mac, exchange)
 
 				// Handle exchange
