@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/pojntfx/weron/pkg/cache"
 	"github.com/pojntfx/weron/pkg/services"
 )
 
@@ -15,5 +16,9 @@ func main() {
 
 	log.Printf("listening on %v", *laddr)
 
-	log.Fatal(http.ListenAndServe(*laddr, services.Signaling(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {}))))
+	network := cache.NewNetwork()
+
+	log.Fatal(http.ListenAndServe(*laddr, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		services.Signaling(network, rw, r)
+	})))
 }

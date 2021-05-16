@@ -1,39 +1,39 @@
 package api
 
-type application struct {
-	message
+type Application struct {
+	Message
 	Community string `json:"community"`
 	Mac       string `json:"mac"`
 }
 
-type introduction struct {
-	message
+type Introduction struct {
+	Message
 	Mac string `json:"mac"`
 }
 
-func NewApplication(community, mac string) *application {
-	return &application{
-		message:   message{TypeApplication},
+func NewApplication(community, mac string) *Application {
+	return &Application{
+		Message:   Message{TypeApplication},
 		Community: community,
 		Mac:       mac,
 	}
 }
 
-func NewAcceptance() *message {
-	return &message{TypeAcceptance}
+func NewAcceptance() *Message {
+	return &Message{TypeAcceptance}
 }
 
-func NewRejection() *message {
-	return &message{TypeRejection}
+func NewRejection() *Message {
+	return &Message{TypeRejection}
 }
 
-func NewReady() *message {
-	return &message{TypeReady}
+func NewReady() *Message {
+	return &Message{TypeReady}
 }
 
-func NewIntroduction(mac string) *introduction {
-	return &introduction{
-		message: message{TypeIntroduction},
+func NewIntroduction(mac string) *Introduction {
+	return &Introduction{
+		Message: Message{TypeIntroduction},
 		Mac:     mac,
 	}
 }
