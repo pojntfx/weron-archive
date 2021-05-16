@@ -36,7 +36,14 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 		defer func() {
 			log.Println("could not continue in handler:", msg)
 
-			c.Close(websocket.StatusInternalError, msg)
+			// Handle exited; ignore the error as it might be a no-op
+			_ = network.HandleExited(community, mac)
+
+			// Close the connection; ignore the error as it might be a no-op
+			if len(msg) >= 123 {
+				msg = msg[:122] // String max is 123
+			}
+			_ = c.Close(websocket.StatusInternalError, msg)
 		}()
 
 		for {
@@ -58,6 +65,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 
 			// Handle different message types
 			switch v.Type {
+			// Admission
 			case api.TypeApplication:
 				// Cast to application
 				var application api.Application
@@ -98,6 +106,8 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 
 					return
 				}
+
+			// Exchange
 			case api.TypeOffer:
 				fallthrough
 			case api.TypeAnswer:
@@ -116,6 +126,17 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				// Handle exchange
 				if err := network.HandleExchange(community, mac, exchange); err != nil {
 					msg = "could not handle ready: " + err.Error()
+
+					return
+				}
+
+			// Discharge
+			case api.TypeExited:
+				log.Printf("handling exited for community %v and MAC address %v: %v", community, mac, v)
+
+				// Handle exited
+				if err := network.HandleExited(community, mac); err != nil {
+					msg = "could not handle exited: " + err.Error()
 
 					return
 				}
