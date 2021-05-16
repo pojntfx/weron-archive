@@ -1,10 +1,13 @@
 package cache
 
 import (
+	"context"
 	"errors"
 	"sync"
 
+	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
 )
 
 type Network struct {
@@ -39,6 +42,30 @@ func (n *Network) HandleApplication(community string, mac string, conn *websocke
 
 	// Apply changes
 	n.communities[community] = comm
+
+	return nil
+}
+
+func (n *Network) HandleReady(community string, mac string) error {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	comm, ok := n.communities[community]
+	if !ok {
+		return errors.New("could not access community: community doesn't exist")
+	}
+
+	for candidate, conn := range comm {
+		// Ignore the node which sent the ready message
+		if candidate == mac {
+			continue
+		}
+
+		// Send introduction
+		if err := wsjson.Write(context.Background(), conn, api.NewIntroduction(mac)); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
