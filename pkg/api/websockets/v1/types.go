@@ -7,4 +7,9 @@ const (
 	TypeRejection    = "rejection"
 	TypeReady        = "ready"
 	TypeIntroduction = "introduction"
+
+	// Exchange
+	TypeOffer     = "offer"
+	TypeAnswer    = "answer"
+	TypeCandidate = "candidate"
 )

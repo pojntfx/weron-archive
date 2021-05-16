@@ -98,8 +98,27 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 
 					return
 				}
-			case api.TypeIntroduction:
-				log.Println("handling introduction:", v)
+			case api.TypeOffer:
+				fallthrough
+			case api.TypeAnswer:
+				fallthrough
+			case api.TypeCandidate:
+				// Cast to exchange
+				var exchange api.Exchange
+				if err := json.Unmarshal(data, &exchange); err != nil {
+					msg = "could not parse JSON from WebSocket: " + err.Error()
+
+					return
+				}
+
+				log.Printf("handling exchange for community %v and src MAC address %v: %v", community, mac, exchange)
+
+				// Handle exchange
+				if err := network.HandleExchange(community, mac, exchange); err != nil {
+					msg = "could not handle ready: " + err.Error()
+
+					return
+				}
 			default:
 				msg = fmt.Sprintf("could not handle message type, received unknown message type \"%v\"", v.Type)
 
