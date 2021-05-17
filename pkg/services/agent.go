@@ -47,6 +47,8 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 				log.Println("handling rejection:", v)
 
 				fatal <- "could not join community: MAC address rejected. Please retry with another MAC address."
+
+				return
 			case api.TypeAcceptance:
 				log.Println("handling acceptance:", v)
 
@@ -73,23 +75,25 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 		}
 	}()
 
-	// Send application
-	application := api.NewApplication(community, mac.String())
-	log.Println("sending application:", application)
+	go func() {
+		// Send application
+		application := api.NewApplication(community, mac.String())
+		log.Println("sending application:", application)
 
-	if err := wsjson.Write(context.Background(), c, api.NewApplication(community, mac.String())); err != nil {
-		log.Fatal("could not send application:", err)
-	}
+		if err := wsjson.Write(context.Background(), c, api.NewApplication(community, mac.String())); err != nil {
+			log.Fatal("could not send application:", err)
+		}
 
-	<-ready
+		<-ready
 
-	// Send ready
-	readyMessage := api.NewReady()
-	log.Println("sending ready:", readyMessage)
+		// Send ready
+		readyMessage := api.NewReady()
+		log.Println("sending ready:", readyMessage)
 
-	if err := wsjson.Write(context.Background(), c, readyMessage); err != nil {
-		log.Fatal("could not send ready:", err)
-	}
+		if err := wsjson.Write(context.Background(), c, readyMessage); err != nil {
+			log.Fatal("could not send ready:", err)
+		}
+	}()
 
 	select {
 	case <-done:
