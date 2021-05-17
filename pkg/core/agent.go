@@ -76,10 +76,18 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 		for {
 			log.Printf("sending to data channel for mac %v", mac)
 
-			dataChannel.Send([]byte("Hello, world from " + a.mac + "!"))
+			if err := dataChannel.Send([]byte("Hello, world from " + a.mac + "!")); err != nil {
+				_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+
+				return
+			}
 
 			time.Sleep(time.Second)
 		}
+	})
+
+	dataChannel.OnClose(func() {
+		_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
 	})
 
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -155,10 +163,18 @@ func (a *Agent) HandleOffer(mac string, data []byte, c *websocket.Conn) error {
 				for {
 					log.Printf("sending to data channel for mac %v", mac)
 
-					dataChannel.Send([]byte("Hello, world from " + a.mac + "!"))
+					if err := dataChannel.Send([]byte("Hello, world from " + a.mac + "!")); err != nil {
+						_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+
+						return
+					}
 
 					time.Sleep(time.Second)
 				}
+			})
+
+			dataChannel.OnClose(func() {
+				_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
 			})
 
 			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -210,9 +226,9 @@ func (a *Agent) HandleCandidate(mac string, data []byte, c *websocket.Conn) erro
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	peerConnection, ok := a.connections[mac]
-	if !ok {
-		return errors.New("could not access peer connection: peer connection doesn't exist")
+	peerConnection, err := a.ensureConnection(mac)
+	if err != nil {
+		return err
 	}
 
 	if err := peerConnection.connection.AddICECandidate(webrtc.ICECandidateInit{Candidate: string(data)}); err != nil {
@@ -226,9 +242,9 @@ func (a *Agent) HandleAnswer(mac string, data []byte, c *websocket.Conn) error {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	peerConnection, ok := a.connections[mac]
-	if !ok {
-		return errors.New("could not access peer connection: peer connection doesn't exist")
+	peerConnection, err := a.ensureConnection(mac)
+	if err != nil {
+		return err
 	}
 
 	var answer webrtc.SessionDescription
@@ -237,4 +253,30 @@ func (a *Agent) HandleAnswer(mac string, data []byte, c *websocket.Conn) error {
 	}
 
 	return peerConnection.connection.SetRemoteDescription(answer)
+}
+
+func (a *Agent) HandleResignation(mac string, c *websocket.Conn) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	log.Println("closing connection to " + mac)
+
+	peerConnection, err := a.ensureConnection(mac)
+	if err != nil {
+		return err
+	}
+
+	delete(a.connections, mac)
+
+	return peerConnection.connection.Close()
+}
+
+func (a *Agent) ensureConnection(mac string) (connection, error) {
+	// Check if connection exists
+	conn, ok := a.connections[mac]
+	if !ok {
+		return connection{}, errors.New("could not access connection: connection with MAC address doesn't exist")
+	}
+
+	return conn, nil
 }
