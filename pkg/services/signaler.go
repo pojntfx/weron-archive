@@ -9,7 +9,7 @@ import (
 	"net/http"
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
-	"github.com/pojntfx/weron/pkg/cache"
+	"github.com/pojntfx/weron/pkg/core"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
@@ -19,7 +19,7 @@ const (
 	invalidMAC       = "-1"
 )
 
-func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) {
+func Signaler(signaler *core.Signaler, rw http.ResponseWriter, r *http.Request) {
 	c, err := websocket.Accept(rw, r, nil)
 	if err != nil {
 		log.Println("could not accept on WebSocket:", err)
@@ -38,7 +38,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 			log.Println("could not continue in handler:", msg)
 
 			// Handle exited; ignore the error as it might be a no-op
-			_ = network.HandleExited(community, mac, msg)
+			_ = signaler.HandleExited(community, mac, msg)
 
 			// Handle error during application; the connection might not be added to any community yet, so close directly
 			if community == invalidCommunity && mac == invalidMAC {
@@ -102,7 +102,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				}
 
 				// Handle application
-				if err := network.HandleApplication(application.Community, incomingMAC.String(), c); err != nil {
+				if err := signaler.HandleApplication(application.Community, incomingMAC.String(), c); err != nil {
 					msg = "could not handle application: " + err.Error()
 
 					// Send rejection on error
@@ -125,7 +125,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				log.Printf("handling ready for community %v and MAC address %v: %v", community, mac, v)
 
 				// Handle ready
-				if err := network.HandleReady(community, mac); err != nil {
+				if err := signaler.HandleReady(community, mac); err != nil {
 					msg = "could not handle ready: " + err.Error()
 
 					return
@@ -157,7 +157,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				log.Printf("handling exchange for community %v and src MAC address %v: %v", community, mac, exchange)
 
 				// Handle exchange
-				if err := network.HandleExchange(community, mac, exchange); err != nil {
+				if err := signaler.HandleExchange(community, mac, exchange); err != nil {
 					msg = "could not handle ready: " + err.Error()
 
 					return
@@ -168,7 +168,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				log.Printf("handling exited for community %v and MAC address %v: %v", community, mac, v)
 
 				// Handle exited
-				if err := network.HandleExited(community, mac, ""); err != nil {
+				if err := signaler.HandleExited(community, mac, ""); err != nil {
 					msg = "could not handle exited: " + err.Error()
 
 					return
