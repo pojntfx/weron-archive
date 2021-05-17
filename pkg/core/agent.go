@@ -185,3 +185,20 @@ func (a *Agent) HandleCandidate(mac string, data []byte, c *websocket.Conn) erro
 
 	return nil
 }
+
+func (a *Agent) HandleAnswer(mac string, data []byte, c *websocket.Conn) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	peerConnection, ok := a.connections[mac]
+	if !ok {
+		return errors.New("could not access peer connection: peer connection doesn't exist")
+	}
+
+	var answer webrtc.SessionDescription
+	if err := json.Unmarshal(data, &answer); err != nil {
+		return err
+	}
+
+	return peerConnection.SetRemoteDescription(answer)
+}
