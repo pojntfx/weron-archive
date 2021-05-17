@@ -127,14 +127,20 @@ func (n *Network) HandleExited(community string, srcMAC string, msg string) erro
 		delete(n.communities, community)
 	}
 
-	// Close the connection
+	// Close the connection (regular)
 	if msg == "" {
 		msg = "resignation"
+
+		if err := conn.Close(websocket.StatusNormalClosure, msg); err != nil {
+			return err
+		}
 	}
+
+	// Close the connection (non-regular)
 	if len(msg) >= 123 {
 		msg = msg[:122] // string max is 123
 	}
-	if err := conn.Close(websocket.StatusNormalClosure, msg); err != nil {
+	if err := conn.Close(websocket.StatusProtocolError, msg); err != nil {
 		return err
 	}
 

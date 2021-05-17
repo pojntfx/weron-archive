@@ -39,6 +39,16 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 
 			// Handle exited; ignore the error as it might be a no-op
 			_ = network.HandleExited(community, mac, msg)
+
+			// Handle error during application; the connection might not be added to any community yet, so close directly
+			if community == invalidCommunity && mac == invalidMAC {
+				if len(msg) >= 123 {
+					msg = msg[:122] // string max is 123
+				}
+				if err := c.Close(websocket.StatusProtocolError, msg); err != nil {
+					log.Println("could not close connection:", err)
+				}
+			}
 		}()
 
 		for {
@@ -80,7 +90,8 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				log.Println("handling application:", application)
 
 				// Validate incoming community and MAC address
-				if _, err := net.ParseMAC(application.Mac); application.Community == invalidCommunity || application.Mac == invalidMAC || err != nil {
+				incomingMAC, err := net.ParseMAC(application.Mac)
+				if application.Community == invalidCommunity || application.Mac == invalidMAC || err != nil {
 					msg = "could not handle application: invalid community or MAC"
 
 					if err != nil {
@@ -91,7 +102,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				}
 
 				// Handle application
-				if err := network.HandleApplication(application.Community, application.Mac, c); err != nil {
+				if err := network.HandleApplication(application.Community, incomingMAC.String(), c); err != nil {
 					msg = "could not handle application: " + err.Error()
 
 					// Send rejection on error
@@ -104,7 +115,7 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 
 				// Set community and MAC address for this connection
 				community = application.Community
-				mac = application.Mac
+				mac = incomingMAC.String()
 
 				// Send acceptance
 				if err := wsjson.Write(context.Background(), c, api.NewAcceptance()); err != nil {
@@ -135,11 +146,13 @@ func Signaling(network *cache.Network, rw http.ResponseWriter, r *http.Request) 
 				}
 
 				// Validate incoming MAC address
-				if _, err := net.ParseMAC(exchange.Mac); err != nil {
+				incomingMAC, err := net.ParseMAC(exchange.Mac)
+				if err != nil {
 					msg = "could not handle application: invalid MAC address: " + err.Error()
 
 					return
 				}
+				exchange.Mac = incomingMAC.String()
 
 				log.Printf("handling exchange for community %v and src MAC address %v: %v", community, mac, exchange)
 
