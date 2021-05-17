@@ -1,4 +1,4 @@
-package cache
+package core
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 )
 
-type Network struct {
+type Signaler struct {
 	lock sync.Mutex
 
 	communities map[string]connections
@@ -18,19 +18,19 @@ type Network struct {
 
 type connections map[string]*websocket.Conn
 
-func NewNetwork() *Network {
-	return &Network{
+func NewSignaler() *Signaler {
+	return &Signaler{
 		communities: map[string]connections{},
 	}
 }
 
-func (n *Network) HandleApplication(community string, mac string, conn *websocket.Conn) error {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+func (s *Signaler) HandleApplication(community string, mac string, conn *websocket.Conn) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	// Initialize or copy community
 	comm := make(connections)
-	if candidate, ok := n.communities[community]; ok {
+	if candidate, ok := s.communities[community]; ok {
 		comm = candidate
 	}
 
@@ -41,17 +41,17 @@ func (n *Network) HandleApplication(community string, mac string, conn *websocke
 	comm[mac] = conn
 
 	// Apply changes
-	n.communities[community] = comm
+	s.communities[community] = comm
 
 	return nil
 }
 
-func (n *Network) HandleReady(community string, srcMAC string) error {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+func (s *Signaler) HandleReady(community string, srcMAC string) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	// Check if community and MAC exist
-	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	comm, err := s.ensureCommunityAndMAC(community, srcMAC)
 	if err != nil {
 		return err
 	}
@@ -71,12 +71,12 @@ func (n *Network) HandleReady(community string, srcMAC string) error {
 	return nil
 }
 
-func (n *Network) HandleExchange(community string, srcMAC string, exchange api.Exchange) error {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+func (s *Signaler) HandleExchange(community string, srcMAC string, exchange api.Exchange) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	// Check if community and MAC exist
-	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	comm, err := s.ensureCommunityAndMAC(community, srcMAC)
 	if err != nil {
 		return err
 	}
@@ -94,12 +94,12 @@ func (n *Network) HandleExchange(community string, srcMAC string, exchange api.E
 	return wsjson.Write(context.Background(), dst, exchange)
 }
 
-func (n *Network) HandleExited(community string, srcMAC string, msg string) error {
-	n.lock.Lock()
-	defer n.lock.Unlock()
+func (s *Signaler) HandleExited(community string, srcMAC string, msg string) error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 
 	// Check if community and MAC exist
-	comm, err := n.ensureCommunityAndMAC(community, srcMAC)
+	comm, err := s.ensureCommunityAndMAC(community, srcMAC)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func (n *Network) HandleExited(community string, srcMAC string, msg string) erro
 
 	// Delete the community if it is now empty
 	if len(comm) == 0 {
-		delete(n.communities, community)
+		delete(s.communities, community)
 	}
 
 	// Close the connection (regular)
@@ -147,9 +147,9 @@ func (n *Network) HandleExited(community string, srcMAC string, msg string) erro
 	return nil
 }
 
-func (n *Network) ensureCommunityAndMAC(community, mac string) (connections, error) {
+func (s *Signaler) ensureCommunityAndMAC(community, mac string) (connections, error) {
 	// Check if community exists
-	comm, ok := n.communities[community]
+	comm, ok := s.communities[community]
 	if !ok {
 		return nil, errors.New("could not access community: community doesn't exist")
 	}
