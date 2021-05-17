@@ -69,6 +69,38 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 
 					return
 				}
+			case api.TypeOffer:
+				// Cast to exchange
+				var exchange api.Exchange
+				if err := json.Unmarshal(data, &exchange); err != nil {
+					log.Println("could not parse JSON from WebSocket:", err)
+
+					return
+				}
+
+				log.Println("handling offer:", exchange)
+
+				if err := agent.HandleOffer(exchange.Mac, exchange.Payload, c); err != nil {
+					log.Println("could not handle offer:", err)
+
+					return
+				}
+			case api.TypeCandidate:
+				// Cast to exchange
+				var exchange api.Exchange
+				if err := json.Unmarshal(data, &exchange); err != nil {
+					log.Println("could not parse JSON from WebSocket:", err)
+
+					return
+				}
+
+				log.Println("handling candidate:", exchange)
+
+				if err := agent.HandleCandidate(exchange.Mac, exchange.Payload, c); err != nil {
+					log.Println("could not handle candidate:", err)
+
+					return
+				}
 
 			// Discharge
 			default:
