@@ -24,7 +24,7 @@ func NewSignaler() *Signaler {
 	}
 }
 
-func (s *Signaler) HandleApplication(community string, mac string, conn *websocket.Conn) error {
+func (s *Signaler) HandleApplication(community string, mac string, c *websocket.Conn) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -38,7 +38,7 @@ func (s *Signaler) HandleApplication(community string, mac string, conn *websock
 	if _, ok := comm[mac]; ok {
 		return errors.New("could not add MAC address to community: MAC address is already in community")
 	}
-	comm[mac] = conn
+	comm[mac] = c
 
 	// Apply changes
 	s.communities[community] = comm

@@ -64,7 +64,11 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 
 				log.Println("handling introduction:", introduction)
 
-				// TODO: Call agent.HandleIntroduction which creates WebRTC connection, add to map based on MAC, send offer to MAC
+				if err := agent.HandleIntroduction(introduction.Mac, c); err != nil {
+					log.Println("could not handle introduction:", err)
+
+					return
+				}
 
 			// Discharge
 			default:
