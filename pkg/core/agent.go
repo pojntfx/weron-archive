@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v3"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
@@ -20,12 +21,19 @@ const (
 type Agent struct {
 	lock sync.Mutex
 
-	connections map[string]*webrtc.PeerConnection
+	connections map[string]connection
+	mac         string
 }
 
-func NewAgent() *Agent {
+type connection struct {
+	connection  *webrtc.PeerConnection
+	dataChannel *webrtc.DataChannel
+}
+
+func NewAgent(mac string) *Agent {
 	return &Agent{
-		connections: map[string]*webrtc.PeerConnection{},
+		connections: map[string]connection{},
+		mac:         mac,
 	}
 }
 
@@ -46,27 +54,37 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 	}
 
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		data, err := json.Marshal(i)
-		if err != nil {
-			log.Println("could not marshal ICE candidate:", err)
-
-			return
-		}
-
 		// Send candidate
-		log.Printf("sending candidate %v", i)
+		if i != nil {
+			log.Printf("sending candidate %v", i)
 
-		if err := wsjson.Write(context.Background(), c, api.NewCandidate(mac, data)); err != nil {
-			log.Println("could not send candidate:", err)
+			if err := wsjson.Write(context.Background(), c, api.NewCandidate(mac, []byte(i.ToJSON().Candidate))); err != nil {
+				log.Println("could not send candidate:", err)
 
-			return
+				return
+			}
 		}
 	})
 
 	// Create a datachannel
-	if _, err = peerConnection.CreateDataChannel(dataChannelName, nil); err != nil {
+	dataChannel, err := peerConnection.CreateDataChannel(dataChannelName, nil)
+	if err != nil {
 		panic(err)
 	}
+
+	dataChannel.OnOpen(func() {
+		for {
+			log.Printf("sending to data channel for mac %v", mac)
+
+			dataChannel.Send([]byte("Hello, world from " + a.mac + "!"))
+
+			time.Sleep(time.Second)
+		}
+	})
+
+	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		log.Printf("received from data channel: %v", string(msg.Data))
+	})
 
 	offer, err := peerConnection.CreateOffer(nil)
 	if err != nil {
@@ -86,7 +104,10 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 		return err
 	}
 
-	a.connections[mac] = peerConnection
+	a.connections[mac] = connection{
+		connection:  peerConnection,
+		dataChannel: dataChannel,
+	}
 
 	return nil
 }
@@ -109,28 +130,48 @@ func (a *Agent) HandleOffer(mac string, data []byte, c *websocket.Conn) error {
 			return err
 		}
 
+		a.connections[mac] = connection{
+			connection: newPeerConnection,
+		}
+
 		newPeerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
-			data, err := json.Marshal(i)
-			if err != nil {
-				log.Println("could not marshal ICE candidate:", err)
-
-				return
-			}
-
 			// Send candidate
-			log.Printf("sending candidate %v", i)
+			if i != nil {
+				log.Printf("sending candidate %v", i)
 
-			if err := wsjson.Write(context.Background(), c, api.NewCandidate(mac, data)); err != nil {
-				log.Println("could not send candidate:", err)
+				if err := wsjson.Write(context.Background(), c, api.NewCandidate(mac, []byte(i.ToJSON().Candidate))); err != nil {
+					log.Println("could not send candidate:", err)
 
-				return
+					return
+				}
 			}
 		})
 
-		a.connections[mac] = newPeerConnection
+		newPeerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+			a.lock.Lock()
+			defer a.lock.Unlock()
 
-		peerConnection = newPeerConnection
+			dataChannel.OnOpen(func() {
+				for {
+					log.Printf("sending to data channel for mac %v", mac)
 
+					dataChannel.Send([]byte("Hello, world from " + a.mac + "!"))
+
+					time.Sleep(time.Second)
+				}
+			})
+
+			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
+				log.Printf("received from data channel: %v", string(msg.Data))
+			})
+
+			conn := a.connections[mac]
+			conn.dataChannel = dataChannel
+
+			a.connections[mac] = conn
+		})
+
+		peerConnection = a.connections[mac]
 	}
 
 	var offer webrtc.SessionDescription
@@ -138,15 +179,15 @@ func (a *Agent) HandleOffer(mac string, data []byte, c *websocket.Conn) error {
 		return err
 	}
 
-	if err := peerConnection.SetRemoteDescription(offer); err != nil {
+	if err := peerConnection.connection.SetRemoteDescription(offer); err != nil {
 		return err
 	}
 
-	answer, err := peerConnection.CreateAnswer(&webrtc.AnswerOptions{})
+	answer, err := peerConnection.connection.CreateAnswer(nil)
 	if err != nil {
 		return err
 	}
-	peerConnection.SetLocalDescription(answer)
+	peerConnection.connection.SetLocalDescription(answer)
 
 	outData, err := json.Marshal(answer)
 	if err != nil {
@@ -174,12 +215,7 @@ func (a *Agent) HandleCandidate(mac string, data []byte, c *websocket.Conn) erro
 		return errors.New("could not access peer connection: peer connection doesn't exist")
 	}
 
-	var candidate webrtc.ICECandidateInit
-	if err := json.Unmarshal(data, &candidate); err != nil {
-		return err
-	}
-
-	if err := peerConnection.AddICECandidate(candidate); err != nil {
+	if err := peerConnection.connection.AddICECandidate(webrtc.ICECandidateInit{Candidate: string(data)}); err != nil {
 		return err
 	}
 
@@ -200,5 +236,5 @@ func (a *Agent) HandleAnswer(mac string, data []byte, c *websocket.Conn) error {
 		return err
 	}
 
-	return peerConnection.SetRemoteDescription(answer)
+	return peerConnection.connection.SetRemoteDescription(answer)
 }
