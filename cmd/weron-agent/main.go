@@ -26,7 +26,7 @@ func main() {
 	}
 
 	// Create core
-	agent := core.NewAgent()
+	agent := core.NewAgent(mac.String())
 
 	// Start
 	c, _, err := websocket.Dial(context.Background(), *raddr, nil)
