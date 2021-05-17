@@ -119,6 +119,22 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 				}
 
 			// Discharge
+			case api.TypeResignation:
+				// Cast to resignation
+				var resignation api.Resignation
+				if err := json.Unmarshal(data, &resignation); err != nil {
+					log.Println("could not parse JSON from WebSocket:", err)
+
+					return
+				}
+
+				log.Println("handling resignation:", resignation)
+
+				if err := agent.HandleResignation(resignation.Mac, c); err != nil {
+					log.Println("could not handle resignation:", err)
+
+					return
+				}
 			default:
 				log.Printf("could not handle message type, received unknown message type \"%v\"", v.Type)
 
