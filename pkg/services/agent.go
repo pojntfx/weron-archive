@@ -101,6 +101,22 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 
 					return
 				}
+			case api.TypeAnswer:
+				// Cast to exchange
+				var exchange api.Exchange
+				if err := json.Unmarshal(data, &exchange); err != nil {
+					log.Println("could not parse JSON from WebSocket:", err)
+
+					return
+				}
+
+				log.Println("handling answer:", exchange)
+
+				if err := agent.HandleAnswer(exchange.Mac, exchange.Payload, c); err != nil {
+					log.Println("could not handle answer:", err)
+
+					return
+				}
 
 			// Discharge
 			default:
