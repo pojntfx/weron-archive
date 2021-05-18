@@ -130,7 +130,7 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 
 				log.Println("handling resignation:", resignation)
 
-				if err := agent.HandleResignation(resignation.Mac, c); err != nil {
+				if err := agent.HandleResignation(resignation.Mac); err != nil {
 					log.Println("could not handle resignation:", err)
 
 					return

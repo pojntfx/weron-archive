@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net"
 	"sync"
 
 	"github.com/pion/webrtc/v3"
@@ -15,6 +16,10 @@ import (
 
 const (
 	dataChannelName = "data"
+)
+
+var (
+	broadcastMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 )
 
 type Agent struct {
@@ -264,21 +269,39 @@ func (a *Agent) HandleResignation(mac string) error {
 }
 
 func (a *Agent) WriteToDataChannel(mac string, frame []byte) error {
-	conn, err := a.ensureConnection(mac)
-	if err != nil {
-		return err
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	// If broadcast, get all connections, else get the connection for the mac
+	connections := []connection{}
+	if mac == broadcastMAC.String() {
+		for candidate, conn := range a.connections {
+			if candidate != mac {
+				connections = append(connections, conn)
+			}
+		}
+	} else {
+		conn, err := a.ensureConnection(mac)
+		if err != nil {
+			return err
+		}
+
+		connections = append(connections, conn)
 	}
 
-	if conn.dataChannel == nil {
-		return errors.New("could not access data channel: connection for data channel exists, but no data channel")
-	}
+	// Write to the data channels for the connections
+	for _, conn := range connections {
+		if conn.dataChannel == nil {
+			return errors.New("could not access data channel: connection for data channel exists, but no data channel")
+		}
 
-	log.Printf("sending to data channel for mac %v", mac)
+		log.Printf("sending to data channel for mac %v", mac)
 
-	if err := conn.dataChannel.Send(frame); err != nil {
-		_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
+		if err := conn.dataChannel.Send(frame); err != nil {
+			_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
 
-		return nil
+			return nil
+		}
 	}
 
 	return nil
