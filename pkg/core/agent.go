@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v3"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
@@ -23,6 +22,7 @@ type Agent struct {
 
 	connections map[string]connection
 	mac         string
+	onReceive   func(mac string, frame []byte)
 }
 
 type connection struct {
@@ -30,10 +30,11 @@ type connection struct {
 	dataChannel *webrtc.DataChannel
 }
 
-func NewAgent(mac string) *Agent {
+func NewAgent(mac string, onReceive func(mac string, frame []byte)) *Agent {
 	return &Agent{
 		connections: map[string]connection{},
 		mac:         mac,
+		onReceive:   onReceive,
 	}
 }
 
@@ -51,6 +52,10 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	a.connections[mac] = connection{
+		connection: peerConnection,
 	}
 
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
@@ -73,25 +78,25 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 	}
 
 	dataChannel.OnOpen(func() {
-		for {
-			log.Printf("sending to data channel for mac %v", mac)
+		a.lock.Lock()
+		defer a.lock.Unlock()
 
-			if err := dataChannel.Send([]byte("Hello, world from " + a.mac + "!")); err != nil {
-				_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+		log.Printf("data channel for mac %v opened", mac)
 
-				return
-			}
+		conn := a.connections[mac]
+		conn.dataChannel = dataChannel
 
-			time.Sleep(time.Second)
-		}
+		a.connections[mac] = conn
 	})
 
 	dataChannel.OnClose(func() {
-		_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+		_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
 	})
 
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		log.Printf("received from data channel: %v", string(msg.Data))
+
+		a.onReceive(mac, msg.Data)
 	})
 
 	offer, err := peerConnection.CreateOffer(nil)
@@ -110,11 +115,6 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 
 	if err := wsjson.Write(context.Background(), c, api.NewOffer(mac, data)); err != nil {
 		return err
-	}
-
-	a.connections[mac] = connection{
-		connection:  peerConnection,
-		dataChannel: dataChannel,
 	}
 
 	return nil
@@ -156,35 +156,27 @@ func (a *Agent) HandleOffer(mac string, data []byte, c *websocket.Conn) error {
 		})
 
 		newPeerConnection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-			a.lock.Lock()
-			defer a.lock.Unlock()
-
 			dataChannel.OnOpen(func() {
-				for {
-					log.Printf("sending to data channel for mac %v", mac)
+				a.lock.Lock()
+				defer a.lock.Unlock()
 
-					if err := dataChannel.Send([]byte("Hello, world from " + a.mac + "!")); err != nil {
-						_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+				log.Printf("data channel for mac %v opened", mac)
 
-						return
-					}
+				conn := a.connections[mac]
+				conn.dataChannel = dataChannel
 
-					time.Sleep(time.Second)
-				}
+				a.connections[mac] = conn
 			})
 
 			dataChannel.OnClose(func() {
-				_ = a.HandleResignation(mac, c) // Close connection; ignore errors as this might be a no-op
+				_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
 			})
 
 			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
 				log.Printf("received from data channel: %v", string(msg.Data))
+
+				a.onReceive(mac, msg.Data)
 			})
-
-			conn := a.connections[mac]
-			conn.dataChannel = dataChannel
-
-			a.connections[mac] = conn
 		})
 
 		peerConnection = a.connections[mac]
@@ -255,7 +247,7 @@ func (a *Agent) HandleAnswer(mac string, data []byte, c *websocket.Conn) error {
 	return peerConnection.connection.SetRemoteDescription(answer)
 }
 
-func (a *Agent) HandleResignation(mac string, c *websocket.Conn) error {
+func (a *Agent) HandleResignation(mac string) error {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
@@ -269,6 +261,27 @@ func (a *Agent) HandleResignation(mac string, c *websocket.Conn) error {
 	delete(a.connections, mac)
 
 	return peerConnection.connection.Close()
+}
+
+func (a *Agent) WriteToDataChannel(mac string, frame []byte) error {
+	conn, err := a.ensureConnection(mac)
+	if err != nil {
+		return err
+	}
+
+	if conn.dataChannel == nil {
+		return errors.New("could not access data channel: connection for data channel exists, but no data channel")
+	}
+
+	log.Printf("sending to data channel for mac %v", mac)
+
+	if err := conn.dataChannel.Send(frame); err != nil {
+		_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
+
+		return nil
+	}
+
+	return nil
 }
 
 func (a *Agent) ensureConnection(mac string) (connection, error) {
