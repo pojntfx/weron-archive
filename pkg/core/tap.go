@@ -62,7 +62,7 @@ func (d *TAPDevice) Write(rawFrame []byte) error {
 }
 
 func (d *TAPDevice) Read() ([]byte, error) {
-	readFrame := make([]byte, d.maximumTransmissionUnit)
+	readFrame := make([]byte, d.maximumTransmissionUnit+14) // + 14 bytes for the ethernet header
 
 	_, err := d.device.Read(readFrame)
 
