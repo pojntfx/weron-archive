@@ -13,7 +13,7 @@ import (
 
 func main() {
 	// Define flags
-	raddr := flag.String("raddr", "ws://localhost:15325", "Signaler address")
+	raddr := flag.String("raddr", "wss://weron.herokuapp.com", "Signaler address")
 	community := flag.String("community", "cluster1", "Community to join")
 	key := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters)")
 	macFlag := flag.String("mac", "cc:0b:cf:23:22:0d", "MAC address to use")
