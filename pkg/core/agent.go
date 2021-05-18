@@ -99,8 +99,6 @@ func (a *Agent) HandleIntroduction(mac string, c *websocket.Conn) error {
 	})
 
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		log.Printf("received from data channel: %v", string(msg.Data))
-
 		a.onReceive(mac, msg.Data)
 	})
 
@@ -178,8 +176,6 @@ func (a *Agent) HandleOffer(mac string, data []byte, c *websocket.Conn) error {
 			})
 
 			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-				log.Printf("received from data channel: %v", string(msg.Data))
-
 				a.onReceive(mac, msg.Data)
 			})
 		})
@@ -269,9 +265,6 @@ func (a *Agent) HandleResignation(mac string) error {
 }
 
 func (a *Agent) WriteToDataChannel(mac string, frame []byte) error {
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
 	// If broadcast, get all connections, else get the connection for the mac
 	connections := []connection{}
 	if mac == broadcastMAC.String() {
@@ -294,8 +287,6 @@ func (a *Agent) WriteToDataChannel(mac string, frame []byte) error {
 		if conn.dataChannel == nil {
 			return errors.New("could not access data channel: connection for data channel exists, but no data channel")
 		}
-
-		log.Printf("sending to data channel for mac %v", mac)
 
 		if err := conn.dataChannel.Send(frame); err != nil {
 			_ = a.HandleResignation(mac) // Close connection; ignore errors as this might be a no-op
