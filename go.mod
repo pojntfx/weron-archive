@@ -1,3 +1,5 @@
+// +heroku install ./cmd/weron-signaler
+
 module github.com/pojntfx/weron
 
 go 1.16
