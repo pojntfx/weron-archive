@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net"
+	"time"
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 	"github.com/pojntfx/weron/pkg/core"
@@ -18,6 +19,21 @@ func Agent(agent *core.Agent, community string, mac net.HardwareAddr, c *websock
 	fatal := make(chan string)
 	done := make(chan struct{})
 
+	// Keep alive
+	keepalive := time.NewTicker(10 * time.Second)
+	defer keepalive.Stop()
+
+	go func() {
+		for range keepalive.C {
+			if err := c.Ping(context.Background()); err != nil {
+				log.Println("could not send ping:", err)
+
+				return
+			}
+		}
+	}()
+
+	// Signal
 	go func() {
 		defer func() {
 			done <- struct{}{}
