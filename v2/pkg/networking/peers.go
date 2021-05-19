@@ -1,6 +1,8 @@
 package networking
 
 import (
+	"errors"
+	"net"
 	"sync"
 
 	"github.com/pion/webrtc/v3"
@@ -8,6 +10,10 @@ import (
 
 const (
 	dataChannelName = "data"
+)
+
+var (
+	broadcastMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}.String()
 )
 
 type PeerManager struct {
@@ -73,6 +79,79 @@ func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) e
 	c.SetLocalDescription(answer)
 
 	m.onAnswer(mac, answer)
+
+	return nil
+}
+
+func (m *PeerManager) HandleCandidate(mac string, candidate webrtc.ICECandidateInit) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	c, err := m.getConnection(mac)
+	if err != nil {
+		return err
+	}
+
+	return c.connection.AddICECandidate(candidate)
+}
+
+func (m *PeerManager) HandleAnswer(mac string, answer webrtc.SessionDescription) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	c, err := m.getConnection(mac)
+	if err != nil {
+		return err
+	}
+
+	return c.connection.SetRemoteDescription(answer)
+}
+
+func (m *PeerManager) HandleResignation(mac string) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	c, err := m.getConnection(mac)
+	if err != nil {
+		return err
+	}
+
+	delete(m.peers, mac)
+
+	return c.connection.Close()
+}
+
+func (m *PeerManager) Write(mac string, frame []byte) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	peers := []peer{}
+	if mac == broadcastMAC {
+		for candidate, p := range m.peers {
+			if candidate != mac {
+				peers = append(peers, p)
+			}
+		}
+	} else {
+		p, err := m.getConnection(mac)
+		if err != nil {
+			return err
+		}
+
+		peers = append(peers, p)
+	}
+
+	for _, p := range peers {
+		if p.channel == nil {
+			return errors.New("could not access data channel: connection for data channel exists, but no data channel")
+		}
+
+		if err := p.channel.Send(frame); err != nil {
+			_ = m.HandleResignation(mac)
+
+			return nil
+		}
+	}
 
 	return nil
 }
@@ -150,4 +229,13 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 	})
 
 	return nil
+}
+
+func (m *PeerManager) getConnection(mac string) (peer, error) {
+	peers, ok := m.peers[mac]
+	if !ok {
+		return peer{}, errors.New("could not access connection: connection with MAC address doesn't exist")
+	}
+
+	return peers, nil
 }
