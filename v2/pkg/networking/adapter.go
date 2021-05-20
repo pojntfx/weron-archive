@@ -18,6 +18,14 @@ type NetworkAdapter struct {
 	tap  *water.Interface
 }
 
+func NewNetworkAdapter(name string, mtu int, mac net.HardwareAddr) *NetworkAdapter {
+	return &NetworkAdapter{
+		name: name,
+		mtu:  mtu,
+		mac:  mac,
+	}
+}
+
 func (a *NetworkAdapter) Open() error {
 	tap, err := water.New(water.Config{
 		DeviceType: water.TAP,
