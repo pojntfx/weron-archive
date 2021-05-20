@@ -22,10 +22,12 @@ type PeerManager struct {
 	ice  []webrtc.ICEServer
 	lock sync.Mutex
 
-	onCandidate func(mac string, i webrtc.ICECandidate)
-	onReceive   func(mac string, frame []byte)
-	onOffer     func(mac string, o webrtc.SessionDescription)
-	onAnswer    func(mac string, o webrtc.SessionDescription)
+	onCandidate        func(mac string, i webrtc.ICECandidate)
+	onReceive          func(mac string, frame []byte)
+	onOffer            func(mac string, o webrtc.SessionDescription)
+	onAnswer           func(mac string, o webrtc.SessionDescription)
+	onDataChannelOpen  func(mac string)
+	onDataChannelClose func(mac string)
 }
 
 func NewPeerManager(
@@ -35,16 +37,20 @@ func NewPeerManager(
 	onReceive func(mac string, frame []byte),
 	onOffer func(mac string, o webrtc.SessionDescription),
 	onAnswer func(mac string, o webrtc.SessionDescription),
+	onDataChannelOpen func(mac string),
+	onDataChannelClose func(mac string),
 ) *PeerManager {
 	return &PeerManager{
 		peers: map[string]peer{},
 
 		ice: ice,
 
-		onCandidate: onCandidate,
-		onReceive:   onReceive,
-		onOffer:     onOffer,
-		onAnswer:    onAnswer,
+		onCandidate:        onCandidate,
+		onReceive:          onReceive,
+		onOffer:            onOffer,
+		onAnswer:           onAnswer,
+		onDataChannelOpen:  onDataChannelOpen,
+		onDataChannelClose: onDataChannelClose,
 	}
 }
 
@@ -216,9 +222,13 @@ func (m *PeerManager) createDataChannel(mac string, c *webrtc.PeerConnection) er
 		peer.channel = dc
 
 		m.peers[mac] = peer
+
+		m.onDataChannelOpen(mac)
 	})
 
 	dc.OnClose(func() {
+		m.onDataChannelClose(mac)
+
 		_ = m.HandleResignation(mac)
 	})
 
@@ -239,9 +249,13 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 			peer.channel = dc
 
 			m.peers[mac] = peer
+
+			m.onDataChannelOpen(mac)
 		})
 
 		dc.OnClose(func() {
+			m.onDataChannelClose(mac)
+
 			_ = m.HandleResignation(mac)
 		})
 

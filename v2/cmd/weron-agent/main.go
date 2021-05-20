@@ -98,6 +98,12 @@ func main() {
 				o   webrtc.SessionDescription
 			}{mac, o}
 		},
+		func(mac string) {
+			log.Println("connected to peer", mac)
+		},
+		func(mac string) {
+			log.Println("disconnected from peer", mac)
+		},
 	)
 	signaler := signaling.NewSignalingClient(
 		conn,
