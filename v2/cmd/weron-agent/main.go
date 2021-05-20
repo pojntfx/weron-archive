@@ -22,7 +22,8 @@ func main() {
 	iceFlag := flag.String("ice", "stun:stun.l.google.com:19302", "Comma-seperated list of STUN servers to use")
 	communityFlag := flag.String("community", "cluster1", "Community to join")
 	raddrFlag := flag.String("raddr", "wss://weron.herokuapp.com", "Address of the signaler to use")
-	keyFlag := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters)")
+	keyFlag := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters); only relevant if AES encryption is enabled")
+	encryptFlag := flag.Bool("encrypt", true, "In addition to WebRTC's built-in wire security, also encrypt frames using AES")
 
 	// Parse flags
 	flag.Parse()
@@ -74,12 +75,14 @@ func main() {
 			}{mac, i}
 		},
 		func(mac string, frame []byte) {
-			decryptedFrame, err := utils.Decrypt(frame, key)
-			if err != nil {
-				log.Fatal(err)
+			if *encryptFlag {
+				frame, err = utils.Decrypt(frame, key)
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
 
-			if err := adapter.Write(decryptedFrame); err != nil {
+			if err := adapter.Write(frame); err != nil {
 				log.Fatal(err)
 			}
 		},
@@ -134,24 +137,26 @@ func main() {
 
 	go func() {
 		for {
-			unencryptedFrame, err := adapter.Read()
+			frame, err := adapter.Read()
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			dst, err := utils.GetDestination(unencryptedFrame)
+			dst, err := utils.GetDestination(frame)
 			if err != nil {
 				log.Println("could not get destination from frame, continuing:", err)
 
 				continue
 			}
 
-			encryptedFrame, err := utils.Encrypt(unencryptedFrame, key)
-			if err != nil {
-				log.Fatal(err)
+			if *encryptFlag {
+				frame, err = utils.Encrypt(frame, key)
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
 
-			if err := peers.Write(dst.String(), encryptedFrame); err != nil {
+			if err := peers.Write(dst.String(), frame); err != nil {
 				log.Println("could not write to peer, continuing:", err)
 
 				continue
