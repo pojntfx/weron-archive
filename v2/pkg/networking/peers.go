@@ -22,10 +22,30 @@ type PeerManager struct {
 	ice  []webrtc.ICEServer
 	lock sync.Mutex
 
-	onCandidate func(mac string, i *webrtc.ICECandidate)
+	onCandidate func(mac string, i webrtc.ICECandidate)
 	onReceive   func(mac string, frame []byte)
 	onOffer     func(mac string, o webrtc.SessionDescription)
 	onAnswer    func(mac string, o webrtc.SessionDescription)
+}
+
+func NewPeerManager(
+	ice []webrtc.ICEServer,
+
+	onCandidate func(mac string, i webrtc.ICECandidate),
+	onReceive func(mac string, frame []byte),
+	onOffer func(mac string, o webrtc.SessionDescription),
+	onAnswer func(mac string, o webrtc.SessionDescription),
+) *PeerManager {
+	return &PeerManager{
+		peers: map[string]peer{},
+
+		ice: ice,
+
+		onCandidate: onCandidate,
+		onReceive:   onReceive,
+		onOffer:     onOffer,
+		onAnswer:    onAnswer,
+	}
 }
 
 type peer struct {
@@ -172,7 +192,9 @@ func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 	}
 
 	c.OnICECandidate(func(i *webrtc.ICECandidate) {
-		m.onCandidate(mac, i)
+		if i != nil {
+			m.onCandidate(mac, *i)
+		}
 	})
 
 	return c, nil
@@ -201,7 +223,7 @@ func (m *PeerManager) createDataChannel(mac string, c *webrtc.PeerConnection) er
 	})
 
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		m.onReceive(mac, msg.Data)
+		go m.onReceive(mac, msg.Data)
 	})
 
 	return nil
