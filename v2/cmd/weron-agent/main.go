@@ -24,6 +24,7 @@ func main() {
 	raddrFlag := flag.String("raddr", "wss://weron.herokuapp.com", "Address of the signaler to use")
 	keyFlag := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters); only relevant if AES encryption is enabled")
 	encryptFlag := flag.Bool("encrypt", true, "In addition to WebRTC's built-in wire security, also encrypt frames using AES")
+	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 
 	// Parse flags
 	flag.Parse()
@@ -163,7 +164,9 @@ func main() {
 			}
 
 			if err := peers.Write(dst.String(), frame); err != nil {
-				log.Println("could not write to peer, continuing:", err)
+				if *verboseFlag {
+					log.Println("could not write to peer, continuing:", err)
+				}
 
 				continue
 			}
