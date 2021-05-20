@@ -260,7 +260,7 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 		})
 
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-			m.onReceive(mac, msg.Data)
+			go m.onReceive(mac, msg.Data)
 		})
 	})
 
