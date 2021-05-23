@@ -225,6 +225,8 @@ func main() {
 						defer func() {
 							if cmd.Process != nil {
 								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+
+								_ = cmd.Wait() // Ignored as it can be a no-op
 							}
 						}()
 					}
@@ -318,6 +320,8 @@ func main() {
 						_ = signaler.Close() // Ignored as it can be a no-op
 						if cmd.Process != nil {
 							_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+
+							_ = cmd.Wait() // Ignored as it can be a no-op
 						}
 
 						done <- struct{}{}
