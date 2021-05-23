@@ -17,7 +17,7 @@ var (
 )
 
 type PeerManager struct {
-	peers map[string]peer
+	peers map[string]*peer
 
 	ice  []webrtc.ICEServer
 	lock sync.Mutex
@@ -41,7 +41,7 @@ func NewPeerManager(
 	onDataChannelClose func(mac string),
 ) *PeerManager {
 	return &PeerManager{
-		peers: map[string]peer{},
+		peers: map[string]*peer{},
 
 		ice: ice,
 
@@ -57,6 +57,7 @@ func NewPeerManager(
 type peer struct {
 	connection *webrtc.PeerConnection
 	channel    *webrtc.DataChannel
+	candidates []webrtc.ICECandidateInit
 }
 
 func (m *PeerManager) HandleIntroduction(mac string) error {
@@ -96,6 +97,9 @@ func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) e
 		return err
 	}
 
+	// No need to loop over queued candidates here, as the peer
+	// has just been created above so there can't be any
+
 	answer, err := c.CreateAnswer(nil)
 	if err != nil {
 		_ = m.HandleResignation(mac)
@@ -118,7 +122,15 @@ func (m *PeerManager) HandleCandidate(mac string, candidate webrtc.ICECandidateI
 		return err
 	}
 
-	return c.connection.AddICECandidate(candidate)
+	// If remote description has been set, continue
+	if c.connection.RemoteDescription() != nil {
+		return c.connection.AddICECandidate(candidate)
+	}
+
+	// If remote description has not been set, queue it
+	c.candidates = append(c.candidates, candidate)
+
+	return nil
 }
 
 func (m *PeerManager) HandleAnswer(mac string, answer webrtc.SessionDescription) error {
@@ -130,7 +142,23 @@ func (m *PeerManager) HandleAnswer(mac string, answer webrtc.SessionDescription)
 		return err
 	}
 
-	return c.connection.SetRemoteDescription(answer)
+	if err := c.connection.SetRemoteDescription(answer); err != nil {
+		return err
+	}
+
+	// Add queued candidates if there are any
+	if len(c.candidates) > 0 {
+		for _, candidate := range c.candidates {
+			if err := c.connection.AddICECandidate(candidate); err != nil {
+				return err
+			}
+		}
+
+		// Clear now-added candidates
+		c.candidates = []webrtc.ICECandidateInit{}
+	}
+
+	return nil
 }
 
 func (m *PeerManager) HandleResignation(mac string) error {
@@ -151,7 +179,7 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	peers := []peer{}
+	peers := []*peer{}
 	if mac == broadcastMAC {
 		for candidate, p := range m.peers {
 			if candidate != mac {
@@ -193,8 +221,9 @@ func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 
-	m.peers[mac] = peer{
+	m.peers[mac] = &peer{
 		connection: c,
+		candidates: []webrtc.ICECandidateInit{},
 	}
 
 	c.OnICECandidate(func(i *webrtc.ICECandidate) {
@@ -267,10 +296,10 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 	return nil
 }
 
-func (m *PeerManager) getConnection(mac string) (peer, error) {
+func (m *PeerManager) getConnection(mac string) (*peer, error) {
 	peers, ok := m.peers[mac]
 	if !ok {
-		return peer{}, errors.New("could not access connection: connection with MAC address doesn't exist")
+		return &peer{}, errors.New("could not access connection: connection with MAC address doesn't exist")
 	}
 
 	return peers, nil
