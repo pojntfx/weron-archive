@@ -29,8 +29,7 @@ func main() {
 	iceFlag := flag.String("ice", "stun:stun.l.google.com:19302", "Comma-seperated list of STUN servers to use")
 	communityFlag := flag.String("community", "cluster1", "Community to join")
 	raddrFlag := flag.String("raddr", "wss://weron.herokuapp.com", "Address of the signaler to use")
-	keyFlag := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters); only relevant if AES encryption is enabled")
-	encryptFlag := flag.Bool("encrypt", true, "In addition to WebRTC's built-in wire security, also encrypt frames using AES")
+	keyFlag := flag.String("key", "abcdefghijklmopq", "Key for the community (16, 24 or 32 characters)")
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	signalFlag := flag.Bool("signal", false, "Enable signaling server subsystem")
 	agentFlag := flag.Bool("agent", false, "Enable agent subsystem")
@@ -102,13 +101,11 @@ func main() {
 					}{mac, i}
 				},
 				func(mac string, frame []byte) {
-					if *encryptFlag {
-						frame, err = utils.Decrypt(frame, key)
-						if err != nil {
-							fatal <- err
+					frame, err = utils.Decrypt(frame, key)
+					if err != nil {
+						fatal <- err
 
-							return
-						}
+						return
 					}
 
 					if err := adapter.Write(frame); err != nil {
@@ -168,12 +165,19 @@ func main() {
 						return
 					}
 				},
-				func(mac string) {
-					if err := peers.HandleResignation(mac); err != nil {
-						fatal <- err
-
-						return
+				func(mac string, blocked bool) {
+					if blocked {
+						log.Printf("blocked connection to peer %v due to wrong key", mac)
 					}
+
+					// Ignore as this can be a no-op
+					_ = peers.HandleResignation(mac)
+				},
+				func(data []byte) ([]byte, error) {
+					return utils.Encrypt(data, key)
+				},
+				func(data []byte) ([]byte, error) {
+					return utils.Decrypt(data, key)
 				},
 			)
 
@@ -200,13 +204,11 @@ func main() {
 						continue
 					}
 
-					if *encryptFlag {
-						frame, err = utils.Encrypt(frame, key)
-						if err != nil {
-							fatal <- err
+					frame, err = utils.Encrypt(frame, key)
+					if err != nil {
+						fatal <- err
 
-							return
-						}
+						return
 					}
 
 					if err := peers.Write(dst.String(), frame); err != nil {
@@ -255,7 +257,7 @@ func main() {
 		}()
 	}
 
-	// Signaling subsystem
+	// Signaling server subsystem
 	if *signalFlag {
 		go func() {
 			// Parse subsystem-specific flags
@@ -340,8 +342,5 @@ func main() {
 		os.Exit(0)
 	case err := <-fatal:
 		log.Fatal(err)
-
-		return
 	}
-
 }

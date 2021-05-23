@@ -24,7 +24,9 @@ type SignalingClient struct {
 	onOffer        func(mac string, o webrtc.SessionDescription)
 	onCandidate    func(mac string, i webrtc.ICECandidateInit)
 	onAnswer       func(mac string, o webrtc.SessionDescription)
-	onResignation  func(mac string)
+	onResignation  func(mac string, blocked bool)
+	onEncrypt      func(data []byte) ([]byte, error)
+	onDecrypt      func(data []byte) ([]byte, error)
 }
 
 func NewSignalingClient(
@@ -37,7 +39,9 @@ func NewSignalingClient(
 	onOffer func(mac string, o webrtc.SessionDescription),
 	onCandidate func(mac string, i webrtc.ICECandidateInit),
 	onAnswer func(mac string, o webrtc.SessionDescription),
-	onResignation func(mac string),
+	onResignation func(mac string, blocked bool),
+	onEncrypt func(data []byte) ([]byte, error),
+	onDecrypt func(data []byte) ([]byte, error),
 ) *SignalingClient {
 	return &SignalingClient{
 		conn: conn,
@@ -50,6 +54,8 @@ func NewSignalingClient(
 		onCandidate:    onCandidate,
 		onAnswer:       onAnswer,
 		onResignation:  onResignation,
+		onEncrypt:      onEncrypt,
+		onDecrypt:      onDecrypt,
 	}
 }
 
@@ -116,9 +122,17 @@ func (c *SignalingClient) Run() error {
 					return
 				}
 
+				// Decrypt payload
+				payload, err := c.onDecrypt(exchange.Payload)
+				if err != nil {
+					c.onResignation(exchange.Mac, true)
+
+					return
+				}
+
 				// Parse offer
 				var offer webrtc.SessionDescription
-				if err := json.Unmarshal(exchange.Payload, &offer); err != nil {
+				if err := json.Unmarshal(payload, &offer); err != nil {
 					fatal <- err
 
 					return
@@ -134,7 +148,15 @@ func (c *SignalingClient) Run() error {
 					return
 				}
 
-				c.onCandidate(exchange.Mac, webrtc.ICECandidateInit{Candidate: string(exchange.Payload)})
+				// Decrypt payload
+				payload, err := c.onDecrypt(exchange.Payload)
+				if err != nil {
+					c.onResignation(exchange.Mac, true)
+
+					return
+				}
+
+				c.onCandidate(exchange.Mac, webrtc.ICECandidateInit{Candidate: string(payload)})
 			case api.TypeAnswer:
 				// Cast to exchange
 				var exchange api.Exchange
@@ -144,9 +166,17 @@ func (c *SignalingClient) Run() error {
 					return
 				}
 
+				// Decrypt payload
+				payload, err := c.onDecrypt(exchange.Payload)
+				if err != nil {
+					c.onResignation(exchange.Mac, true)
+
+					return
+				}
+
 				// Parse answer
 				var answer webrtc.SessionDescription
-				if err := json.Unmarshal(exchange.Payload, &answer); err != nil {
+				if err := json.Unmarshal(payload, &answer); err != nil {
 					fatal <- err
 
 					return
@@ -164,7 +194,7 @@ func (c *SignalingClient) Run() error {
 					return
 				}
 
-				c.onResignation(resignation.Mac)
+				c.onResignation(resignation.Mac, false)
 
 			// Other messages
 			default:
@@ -199,7 +229,13 @@ func (c *SignalingClient) Run() error {
 }
 
 func (c *SignalingClient) SignalCandidate(mac string, i webrtc.ICECandidate) error {
-	return wsjson.Write(context.Background(), c.conn, api.NewCandidate(mac, []byte(i.ToJSON().Candidate)))
+	// Encrypt payload
+	payload, err := c.onEncrypt([]byte(i.ToJSON().Candidate))
+	if err != nil {
+		return err
+	}
+
+	return wsjson.Write(context.Background(), c.conn, api.NewCandidate(mac, payload))
 }
 
 func (c *SignalingClient) SignalOffer(mac string, o webrtc.SessionDescription) error {
@@ -208,7 +244,13 @@ func (c *SignalingClient) SignalOffer(mac string, o webrtc.SessionDescription) e
 		return err
 	}
 
-	return wsjson.Write(context.Background(), c.conn, api.NewOffer(mac, data))
+	// Encrypt payload
+	payload, err := c.onEncrypt(data)
+	if err != nil {
+		return err
+	}
+
+	return wsjson.Write(context.Background(), c.conn, api.NewOffer(mac, payload))
 }
 
 func (c *SignalingClient) SignalAnswer(mac string, o webrtc.SessionDescription) error {
@@ -217,5 +259,11 @@ func (c *SignalingClient) SignalAnswer(mac string, o webrtc.SessionDescription) 
 		return err
 	}
 
-	return wsjson.Write(context.Background(), c.conn, api.NewAnswer(mac, data))
+	// Encrypt payload
+	payload, err := c.onEncrypt(data)
+	if err != nil {
+		return err
+	}
+
+	return wsjson.Write(context.Background(), c.conn, api.NewAnswer(mac, payload))
 }
