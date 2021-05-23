@@ -154,6 +154,23 @@ func (m *CommunitiesManager) HandleExited(community string, mac string, err erro
 	return conn.Close(websocket.StatusNormalClosure, "resignation")
 }
 
+func (m *CommunitiesManager) Close() []error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	errors := []error{}
+
+	for community, comm := range m.communities {
+		for mac := range comm {
+			if err := m.HandleExited(community, mac, nil); err != nil {
+				errors = append(errors, err)
+			}
+		}
+	}
+
+	return errors
+}
+
 func (m *CommunitiesManager) getCommunity(community string, mac string) (map[string]*websocket.Conn, error) {
 	// Check if community exists
 	comm, ok := m.communities[community]

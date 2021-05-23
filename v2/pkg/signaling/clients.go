@@ -267,3 +267,11 @@ func (c *SignalingClient) SignalAnswer(mac string, o webrtc.SessionDescription) 
 
 	return wsjson.Write(context.Background(), c.conn, api.NewAnswer(mac, payload))
 }
+
+func (c *SignalingClient) Close() error {
+	if c.conn != nil {
+		return c.conn.Close(websocket.StatusGoingAway, "shutting down")
+	}
+
+	return nil
+}

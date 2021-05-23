@@ -59,6 +59,14 @@ func (a *NetworkAdapter) Open() error {
 	return nil
 }
 
+func (a *NetworkAdapter) Close() error {
+	if a.tap != nil {
+		return a.tap.Close()
+	}
+
+	return nil
+}
+
 func (a *NetworkAdapter) Write(frame []byte) error {
 	_, err := a.tap.Write(frame)
 
