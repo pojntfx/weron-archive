@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ func main() {
 
 	// Handle cross-subsystem concerns
 	fatal := make(chan error)
+	done := make(chan struct{})
 
 	// Agent subsystem
 	if *agentFlag {
@@ -76,9 +78,6 @@ func main() {
 
 						return
 					}
-					defer func() {
-						_ = conn.Close(websocket.StatusInternalError, "closing") // Ignored as it can be a no-op
-					}()
 
 					// Handle circular dependencies
 					candidateChan := make(chan struct {
@@ -270,10 +269,41 @@ func main() {
 
 					log.Printf("agent connected to signaler %v", *raddrFlag)
 
+					// Register interrrupt handler
+					go func() {
+						s := make(chan os.Signal, 1)
+						signal.Notify(s, os.Interrupt)
+						<-s
+
+						log.Println("gracefully shutting down agent")
+
+						// Register secondary interrupt handler (which hard-exits)
+						go func() {
+							s := make(chan os.Signal, 1)
+							signal.Notify(s, os.Interrupt)
+							<-s
+
+							log.Fatal("cancelled graceful agent shutdown, exiting immediately")
+						}()
+
+						breaker <- nil
+
+						_ = adapter.Close()  // Ignored as it can be a no-op
+						_ = peers.Close()    // Ignored as it can be a no-op
+						_ = signaler.Close() // Ignored as it can be a no-op
+
+						done <- struct{}{}
+					}()
+
 					breaker <- signaler.Run()
 				}()
 
 				err := <-breaker
+
+				// Interrupting
+				if err == nil {
+					break
+				}
 
 				log.Println("agent crashed, restarting in 1s:", err)
 
@@ -352,6 +382,31 @@ func main() {
 					// Start
 					log.Printf("signaling server listening on %v", addr.String())
 
+					// Register interrrupt handler
+					go func() {
+						s := make(chan os.Signal, 1)
+						signal.Notify(s, os.Interrupt)
+						<-s
+
+						log.Println("gracefully shutting down signaling server")
+
+						// Register secondary interrupt handler (which hard-exits)
+						go func() {
+							s := make(chan os.Signal, 1)
+							signal.Notify(s, os.Interrupt)
+							<-s
+
+							log.Fatal("cancelled graceful signaling server shutdown, exiting immediately")
+						}()
+
+						breaker <- nil
+
+						_ = communities.Close() // Ignored as it can be a no-op
+						_ = signaler.Close()    // Ignored as it can be a no-op
+
+						done <- struct{}{}
+					}()
+
 					breaker <- http.ListenAndServe(addr.String(), http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 						conn, err := websocket.Accept(rw, r, nil)
 						if err != nil {
@@ -374,6 +429,11 @@ func main() {
 
 				err := <-breaker
 
+				// Interrupting
+				if err == nil {
+					break
+				}
+
 				log.Println("signaling server crashed, restarting in 1s:", err)
 
 				time.Sleep(time.Second)
@@ -381,7 +441,20 @@ func main() {
 		}()
 	}
 
-	err := <-fatal
-
-	log.Fatal(err)
+	doneSystems := 0
+	for {
+		select {
+		case err := <-fatal:
+			log.Fatal(err)
+		case <-done:
+			doneSystems++
+			if *agentFlag && *signalFlag {
+				if doneSystems == 2 {
+					os.Exit(0)
+				}
+			} else if doneSystems == 1 {
+				os.Exit(0)
+			}
+		}
+	}
 }
