@@ -211,9 +211,6 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 }
 
 func (m *PeerManager) Close() []error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
 	errors := []error{}
 
 	for mac := range m.peers {
