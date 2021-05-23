@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/google/uuid"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 	"nhooyr.io/websocket"
 )
@@ -17,6 +18,8 @@ const (
 )
 
 type SignalingServer struct {
+	conns map[string]*websocket.Conn
+
 	onApplication func(community string, mac string, conn *websocket.Conn) error
 	onRejection   func(conn *websocket.Conn) error
 	onAcceptance  func(conn *websocket.Conn) error
@@ -34,6 +37,8 @@ func NewSignalingServer(
 	onExchange func(community string, mac string, exchange api.Exchange) error,
 ) *SignalingServer {
 	return &SignalingServer{
+		conns: map[string]*websocket.Conn{},
+
 		onApplication: onApplication,
 		onRejection:   onRejection,
 		onAcceptance:  onAcceptance,
@@ -44,6 +49,10 @@ func NewSignalingServer(
 }
 
 func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
+	// Register connection
+	id := uuid.New()
+	s.conns[id.String()] = conn
+
 	fatal := make(chan error)
 
 	// Community and MAC address for this connection
@@ -185,6 +194,9 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 
 	err := <-fatal
 
+	// Remove connection
+	delete(s.conns, id.String())
+
 	// Handle exited; ignore the error as it might be a no-op
 	_ = s.onExited(community, mac, err)
 
@@ -202,4 +214,16 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 	}
 
 	return err
+}
+
+func (s *SignalingServer) Close() []error {
+	errors := []error{}
+
+	for _, peer := range s.conns {
+		if err := peer.Close(websocket.StatusGoingAway, "shutting down"); err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	return errors
 }

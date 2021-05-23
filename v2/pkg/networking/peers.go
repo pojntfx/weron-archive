@@ -210,6 +210,21 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 	return nil
 }
 
+func (m *PeerManager) Close() []error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	errors := []error{}
+
+	for mac := range m.peers {
+		if err := m.HandleResignation(mac); err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	return errors
+}
+
 func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
