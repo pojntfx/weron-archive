@@ -155,9 +155,6 @@ func (m *CommunitiesManager) HandleExited(community string, mac string, err erro
 }
 
 func (m *CommunitiesManager) Close() []error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
 	errors := []error{}
 
 	for community, comm := range m.communities {
