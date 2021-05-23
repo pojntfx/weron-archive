@@ -8,9 +8,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/pion/webrtc/v3"
@@ -35,6 +37,7 @@ func main() {
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	signalFlag := flag.Bool("signal", false, "Enable signaling server subsystem")
 	agentFlag := flag.Bool("agent", false, "Enable agent subsystem")
+	cmdFlag := flag.String("cmd", "", "Command to run after the interface is up, i.e. 'avahi-autoipd weron0' for ipv4ll")
 
 	// Parse flags
 	flag.Parse()
@@ -197,11 +200,33 @@ func main() {
 						_ = signaler.Close() // Ignored as it can be a no-op
 					}()
 
+					cmd := exec.Command("/bin/sh", "-c", *cmdFlag)
+
 					// Start
 					if err := adapter.Open(); err != nil {
 						breaker <- err
 
 						return
+					}
+
+					if *cmdFlag != "" {
+						cmd.Stdout = os.Stdout
+						cmd.Stderr = os.Stderr
+						cmd.SysProcAttr = &syscall.SysProcAttr{
+							Pdeathsig: syscall.SIGKILL,
+							Setpgid:   true,
+						}
+
+						if err := cmd.Start(); err != nil {
+							breaker <- err
+
+							return
+						}
+						defer func() {
+							if cmd.Process != nil {
+								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+							}
+						}()
 					}
 
 					go func() {
@@ -291,6 +316,9 @@ func main() {
 						_ = adapter.Close()  // Ignored as it can be a no-op
 						_ = peers.Close()    // Ignored as it can be a no-op
 						_ = signaler.Close() // Ignored as it can be a no-op
+						if cmd.Process != nil {
+							_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+						}
 
 						done <- struct{}{}
 					}()
