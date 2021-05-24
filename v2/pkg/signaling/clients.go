@@ -19,6 +19,7 @@ type SignalingClient struct {
 
 	mac       string
 	community string
+	timeout   time.Duration
 
 	onIntroduction func(mac string)
 	onOffer        func(mac string, o webrtc.SessionDescription)
@@ -34,6 +35,7 @@ func NewSignalingClient(
 
 	mac string,
 	community string,
+	timeout time.Duration,
 
 	onIntroduction func(mac string),
 	onOffer func(mac string, o webrtc.SessionDescription),
@@ -48,6 +50,7 @@ func NewSignalingClient(
 
 		mac:       mac,
 		community: community,
+		timeout:   timeout,
 
 		onIntroduction: onIntroduction,
 		onOffer:        onOffer,
@@ -68,7 +71,13 @@ func (c *SignalingClient) Run() error {
 
 	go func() {
 		for range keepalive.C {
-			if err := c.conn.Ping(context.Background()); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+
+			err := c.conn.Ping(ctx)
+			cancel()
+
+			// If ping failed, reconnect
+			if err != nil {
 				fatal <- err
 
 				return

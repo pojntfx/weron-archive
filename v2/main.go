@@ -37,6 +37,7 @@ func main() {
 	verboseFlag := flag.Bool("verbose", false, "Enable verbose logging")
 	signalFlag := flag.Bool("signal", false, "Enable signaling server subsystem")
 	agentFlag := flag.Bool("agent", false, "Enable agent subsystem")
+	timeoutFlag := flag.Int("timeout", 5, "Maximum time in seconds to wait for the signaling server to respond before reconnecting")
 	cmdFlag := flag.String("cmd", "", "Command to run after the interface is up, i.e. 'avahi-autoipd weron0' for ipv4ll")
 
 	// Parse flags
@@ -153,6 +154,7 @@ func main() {
 						conn,
 						mac.String(),
 						*communityFlag,
+						time.Duration(*timeoutFlag)*time.Second,
 						func(mac string) {
 							if err := peers.HandleIntroduction(mac); err != nil {
 								breaker <- err
