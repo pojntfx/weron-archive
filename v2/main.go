@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -39,6 +40,8 @@ func main() {
 	agentFlag := flag.Bool("agent", false, "Enable agent subsystem")
 	timeoutFlag := flag.Int("timeout", 5, "Maximum time in seconds to wait for the signaling server to respond before reconnecting")
 	cmdFlag := flag.String("cmd", "", "Command to run after the interface is up, i.e. 'avahi-autoipd weron0' for ipv4ll")
+	tlsCertFlag := flag.String("tlsCert", "cert.pem", "TLS certificate")
+	tlsKeyFlag := flag.String("tlsKey", "key.pem", "TLS key")
 
 	// Parse flags
 	flag.Parse()
@@ -441,7 +444,14 @@ func main() {
 						done <- struct{}{}
 					}()
 
-					breaker <- http.ListenAndServe(addr.String(), http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					cert, err := tls.LoadX509KeyPair(*tlsCertFlag, *tlsKeyFlag)
+					if err != nil {
+						fatal <- err
+					}
+
+					log.Printf("SHA1 Fingerprint=%v", utils.GetFingerprint(cert))
+
+					fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 						conn, err := websocket.Accept(rw, r, nil)
 						if err != nil {
 							log.Println("could not accept on WebSocket:", err)
