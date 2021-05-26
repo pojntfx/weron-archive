@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -61,6 +62,8 @@ func main() {
 	// Agent subsystem
 	if *agentFlag {
 		go func() {
+			retryWithFingerprint := false
+
 			for {
 				breaker := make(chan error)
 
@@ -84,18 +87,41 @@ func main() {
 
 					// Manually verify TLS certificate if fingerprint is given
 					client := http.DefaultClient
-					if *tlsFingerprintFlag != "" {
+					if *tlsFingerprintFlag != "" || retryWithFingerprint {
 						customTransport := http.DefaultTransport.(*http.Transport).Clone()
 						customTransport.TLSClientConfig = &tls.Config{
 							InsecureSkipVerify: true,
 							VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 								fingerprint := utils.GetFingerprint(rawCerts[0])
 
-								if fingerprint == *tlsFingerprintFlag {
+								// Validate using pre-shared fingerprint
+								if *tlsFingerprintFlag != "" {
+									if fingerprint == *tlsFingerprintFlag {
+										return nil
+									}
+
+									return errors.New("could not accept certificate: fingerprint does not match")
+								}
+
+								// Validate SSH-style by typing yes, no or the fingerprint
+								fmt.Printf("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", *raddrFlag, fingerprint)
+
+								// Read answer
+								scanner := bufio.NewScanner(os.Stdin)
+								scanner.Scan()
+								if scanner.Err() != nil {
+									return err
+								}
+
+								// Check if input is yes, the fingerprint or anything else
+								input := strings.TrimSuffix(scanner.Text(), "\n")
+								if input == "yes" || input == fingerprint {
 									return nil
 								}
 
-								return errors.New("could not accept certificate: fingerprint does not match")
+								fatal <- errors.New("could not dial WebSocket: manual fingerprint validation aborted or wrong fingerprint provided")
+
+								return nil
 							},
 						}
 						client = &http.Client{Transport: customTransport}
@@ -103,6 +129,12 @@ func main() {
 
 					conn, _, err := websocket.Dial(context.Background(), *raddrFlag, &websocket.DialOptions{HTTPClient: client})
 					if err != nil {
+						if strings.Contains(err.Error(), "failed to send handshake request") {
+							retryWithFingerprint = true
+
+							breaker <- fmt.Errorf("")
+						}
+
 						breaker <- fmt.Errorf("could not dial WebSocket: %v", err)
 
 						return
@@ -362,6 +394,11 @@ func main() {
 				// Interrupting
 				if err == nil {
 					break
+				}
+
+				// Custom error message
+				if err.Error() == "" {
+					continue
 				}
 
 				log.Println("agent crashed, restarting in 1s:", err)
