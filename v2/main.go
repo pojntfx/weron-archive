@@ -46,6 +46,7 @@ func main() {
 	tlsCertFlag := flag.String("tlsCert", "cert.pem", "TLS certificate")
 	tlsKeyFlag := flag.String("tlsKey", "key.pem", "TLS key")
 	tlsFingerprintFlag := flag.String("tlsFingerprint", "", "Instead of using a CA, validate the signaling server's TLS cert using it's fingerprint")
+	tlsInsecureSkipVerifyFlag := flag.Bool("tlsInsecureSkipVerify", false, "Skip TLS certificate validation (insecure)")
 
 	// Parse flags
 	flag.Parse()
@@ -87,43 +88,51 @@ func main() {
 
 					// Manually verify TLS certificate if fingerprint is given
 					client := http.DefaultClient
-					if *tlsFingerprintFlag != "" || retryWithFingerprint {
+					if *tlsFingerprintFlag != "" || retryWithFingerprint || *tlsInsecureSkipVerifyFlag {
 						customTransport := http.DefaultTransport.(*http.Transport).Clone()
-						customTransport.TLSClientConfig = &tls.Config{
-							InsecureSkipVerify: true,
-							VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-								fingerprint := utils.GetFingerprint(rawCerts[0])
 
-								// Validate using pre-shared fingerprint
-								if *tlsFingerprintFlag != "" {
-									if fingerprint == *tlsFingerprintFlag {
+						if *tlsFingerprintFlag != "" || retryWithFingerprint {
+							customTransport.TLSClientConfig = &tls.Config{
+								InsecureSkipVerify: true,
+								VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+									fingerprint := utils.GetFingerprint(rawCerts[0])
+
+									// Validate using pre-shared fingerprint
+									if *tlsFingerprintFlag != "" {
+										if fingerprint == *tlsFingerprintFlag {
+											return nil
+										}
+
+										return errors.New("could not accept certificate: fingerprint does not match")
+									}
+
+									// Validate SSH-style by typing yes, no or the fingerprint
+									fmt.Printf("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", *raddrFlag, fingerprint)
+
+									// Read answer
+									scanner := bufio.NewScanner(os.Stdin)
+									scanner.Scan()
+									if scanner.Err() != nil {
+										return err
+									}
+
+									// Check if input is yes, the fingerprint or anything else
+									input := strings.TrimSuffix(scanner.Text(), "\n")
+									if input == "yes" || input == fingerprint {
 										return nil
 									}
 
-									return errors.New("could not accept certificate: fingerprint does not match")
-								}
+									fatal <- errors.New("could not dial WebSocket: manual fingerprint validation aborted or wrong fingerprint provided")
 
-								// Validate SSH-style by typing yes, no or the fingerprint
-								fmt.Printf("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", *raddrFlag, fingerprint)
-
-								// Read answer
-								scanner := bufio.NewScanner(os.Stdin)
-								scanner.Scan()
-								if scanner.Err() != nil {
-									return err
-								}
-
-								// Check if input is yes, the fingerprint or anything else
-								input := strings.TrimSuffix(scanner.Text(), "\n")
-								if input == "yes" || input == fingerprint {
 									return nil
-								}
-
-								fatal <- errors.New("could not dial WebSocket: manual fingerprint validation aborted or wrong fingerprint provided")
-
-								return nil
-							},
+								},
+							}
+						} else {
+							customTransport.TLSClientConfig = &tls.Config{
+								InsecureSkipVerify: true,
+							}
 						}
+
 						client = &http.Client{Transport: customTransport}
 					}
 
