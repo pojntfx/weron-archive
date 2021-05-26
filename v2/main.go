@@ -52,8 +52,8 @@ func main() {
 	agentFlag := flag.Bool("agent", false, "Enable agent subsystem")
 	timeoutFlag := flag.Int("timeout", 5, "Maximum time in seconds to wait for the signaling server to respond before reconnecting")
 	cmdFlag := flag.String("cmd", "", "Command to run after the interface is up, i.e. 'avahi-autoipd weron0' for ipv4ll")
-	tlsCertFlag := flag.String("tlsCert", "cert.pem", "TLS certificate")
-	tlsKeyFlag := flag.String("tlsKey", "key.pem", "TLS key")
+	tlsKeyFlag := flag.String("tlsKey", filepath.Join(prefix, "key.pem"), "TLS key")
+	tlsCertFlag := flag.String("tlsCert", filepath.Join(prefix, "cert.pem"), "TLS certificate")
 	tlsFingerprintFlag := flag.String("tlsFingerprint", "", "Instead of using a CA, validate the signaling server's TLS cert using it's fingerprint")
 	tlsInsecureSkipVerifyFlag := flag.Bool("tlsInsecureSkipVerify", false, "Skip TLS certificate validation (insecure)")
 	knownHostsFile := flag.String("knownHostsFile", filepath.Join(prefix, "known_hosts"), "Known hosts file")
@@ -214,7 +214,7 @@ TLS certificate verification failed.
 
 					conn, _, err := websocket.Dial(context.Background(), *raddrFlag, &websocket.DialOptions{HTTPClient: client})
 					if err != nil {
-						if strings.Contains(err.Error(), "failed to send handshake request") {
+						if strings.Contains(err.Error(), "x509:") {
 							retryWithFingerprint = true
 
 							breaker <- fmt.Errorf("")
@@ -481,7 +481,7 @@ TLS certificate verification failed.
 					break
 				}
 
-				// Custom error message
+				// Custom error handling
 				if err.Error() == "" {
 					continue
 				}
@@ -518,6 +518,30 @@ TLS certificate verification failed.
 						}
 
 						addr.Port = port
+					}
+
+					// Generate TLS cert if it doesn't exist
+					_, keyExists := os.Stat(*tlsKeyFlag)
+					_, certExists := os.Stat(*tlsCertFlag)
+					if keyExists != nil || certExists != nil {
+						key, cert, err := utils.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
+						if err != nil {
+							fatal <- err
+
+							return
+						}
+
+						if err := utils.CreateFileAndLeadingDirectories(*tlsKeyFlag, key); err != nil {
+							fatal <- err
+
+							return
+						}
+
+						if err := utils.CreateFileAndLeadingDirectories(*tlsCertFlag, cert); err != nil {
+							fatal <- err
+
+							return
+						}
 					}
 
 					// Create core
