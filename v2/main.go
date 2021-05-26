@@ -56,6 +56,7 @@ func main() {
 	tlsCertFlag := flag.String("tlsCert", filepath.Join(prefix, "cert.pem"), "TLS certificate")
 	tlsFingerprintFlag := flag.String("tlsFingerprint", "", "Instead of using a CA, validate the signaling server's TLS cert using it's fingerprint")
 	tlsInsecureSkipVerifyFlag := flag.Bool("tlsInsecureSkipVerify", false, "Skip TLS certificate validation (insecure)")
+	tlsEnabled := flag.Bool("tlsEnabled", true, "Serve signaling server using TLS")
 	knownHostsFile := flag.String("knownHostsFile", filepath.Join(prefix, "known_hosts"), "Known hosts file")
 
 	// Parse flags
@@ -521,26 +522,28 @@ TLS certificate verification failed.
 					}
 
 					// Generate TLS cert if it doesn't exist
-					_, keyExists := os.Stat(*tlsKeyFlag)
-					_, certExists := os.Stat(*tlsCertFlag)
-					if keyExists != nil || certExists != nil {
-						key, cert, err := utils.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
-						if err != nil {
-							fatal <- err
+					if *tlsEnabled {
+						_, keyExists := os.Stat(*tlsKeyFlag)
+						_, certExists := os.Stat(*tlsCertFlag)
+						if keyExists != nil || certExists != nil {
+							key, cert, err := utils.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
+							if err != nil {
+								fatal <- err
 
-							return
-						}
+								return
+							}
 
-						if err := utils.CreateFileAndLeadingDirectories(*tlsKeyFlag, key); err != nil {
-							fatal <- err
+							if err := utils.CreateFileAndLeadingDirectories(*tlsKeyFlag, key); err != nil {
+								fatal <- err
 
-							return
-						}
+								return
+							}
 
-						if err := utils.CreateFileAndLeadingDirectories(*tlsCertFlag, cert); err != nil {
-							fatal <- err
+							if err := utils.CreateFileAndLeadingDirectories(*tlsCertFlag, cert); err != nil {
+								fatal <- err
 
-							return
+								return
+							}
 						}
 					}
 
@@ -612,14 +615,7 @@ TLS certificate verification failed.
 						done <- struct{}{}
 					}()
 
-					cert, err := tls.LoadX509KeyPair(*tlsCertFlag, *tlsKeyFlag)
-					if err != nil {
-						fatal <- err
-					}
-
-					log.Printf("SHA1 Fingerprint=%v", utils.GetFingerprint(cert.Certificate[0]))
-
-					fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					handler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 						conn, err := websocket.Accept(rw, r, nil)
 						if err != nil {
 							log.Println("could not accept on WebSocket:", err)
@@ -636,7 +632,20 @@ TLS certificate verification failed.
 								return
 							}
 						}()
-					}))
+					})
+
+					if *tlsEnabled {
+						cert, err := tls.LoadX509KeyPair(*tlsCertFlag, *tlsKeyFlag)
+						if err != nil {
+							fatal <- err
+						}
+
+						log.Printf("Using TLS; SHA1 Fingerprint=%v", utils.GetFingerprint(cert.Certificate[0]))
+
+						fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, handler)
+					} else {
+						fatal <- http.ListenAndServe(addr.String(), handler)
+					}
 				}()
 
 				err := <-breaker
