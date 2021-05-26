@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -42,6 +44,7 @@ func main() {
 	cmdFlag := flag.String("cmd", "", "Command to run after the interface is up, i.e. 'avahi-autoipd weron0' for ipv4ll")
 	tlsCertFlag := flag.String("tlsCert", "cert.pem", "TLS certificate")
 	tlsKeyFlag := flag.String("tlsKey", "key.pem", "TLS key")
+	tlsFingerprintFlag := flag.String("tlsFingerprint", "", "Instead of using a CA, validate the signaling server's TLS cert using it's fingerprint")
 
 	// Parse flags
 	flag.Parse()
@@ -79,7 +82,26 @@ func main() {
 						})
 					}
 
-					conn, _, err := websocket.Dial(context.Background(), *raddrFlag, nil)
+					// Manually verify TLS certificate if fingerprint is given
+					client := http.DefaultClient
+					if *tlsFingerprintFlag != "" {
+						customTransport := http.DefaultTransport.(*http.Transport).Clone()
+						customTransport.TLSClientConfig = &tls.Config{
+							InsecureSkipVerify: true,
+							VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+								fingerprint := utils.GetFingerprint(rawCerts[0])
+
+								if fingerprint == *tlsFingerprintFlag {
+									return nil
+								}
+
+								return errors.New("could not accept certificate: fingerprint does not match")
+							},
+						}
+						client = &http.Client{Transport: customTransport}
+					}
+
+					conn, _, err := websocket.Dial(context.Background(), *raddrFlag, &websocket.DialOptions{HTTPClient: client})
 					if err != nil {
 						breaker <- fmt.Errorf("could not dial WebSocket: %v", err)
 
@@ -449,7 +471,7 @@ func main() {
 						fatal <- err
 					}
 
-					log.Printf("SHA1 Fingerprint=%v", utils.GetFingerprint(cert))
+					log.Printf("SHA1 Fingerprint=%v", utils.GetFingerprint(cert.Certificate[0]))
 
 					fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 						conn, err := websocket.Accept(rw, r, nil)

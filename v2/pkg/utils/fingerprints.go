@@ -2,14 +2,13 @@ package utils
 
 import (
 	"crypto/sha1"
-	"crypto/tls"
 	"fmt"
 	"strings"
 )
 
 // See https://play.golang.org/p/GTxajcr3NY
-func GetFingerprint(cert tls.Certificate) string {
-	rawHash := sha1.Sum(cert.Certificate[0])
+func GetFingerprint(cert []byte) string {
+	rawHash := sha1.Sum(cert)
 
 	hex := fmt.Sprintf("%x", rawHash)
 	if len(hex)%2 == 1 {
