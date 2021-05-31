@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -22,7 +19,6 @@ import (
 
 	"github.com/pion/webrtc/v3"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
-	"github.com/pojntfx/weron/v2/pkg/config"
 	"github.com/pojntfx/weron/v2/pkg/networking"
 	"github.com/pojntfx/weron/v2/pkg/signaling"
 	"github.com/pojntfx/weron/v2/pkg/utils"
@@ -98,117 +94,25 @@ func main() {
 					}
 
 					// Create the config file if it does not exist
-					if err := config.CreateKnownHostsIfNotExists(*knownHostsFile); err != nil {
+					if err := utils.CreateFileAndLeadingDirectories(*knownHostsFile, ""); err != nil {
 						fatal <- err
 
 						return
 					}
 
-					// Manually verify TLS certificate if fingerprint is given
+					// Interactively verify TLS certificate if fingerprint is given
 					client := http.DefaultClient
 					if *tlsFingerprintFlag != "" || retryWithFingerprint || *tlsInsecureSkipVerifyFlag {
 						customTransport := http.DefaultTransport.(*http.Transport).Clone()
 
-						if *tlsFingerprintFlag != "" || retryWithFingerprint {
-							customTransport.TLSClientConfig = &tls.Config{
-								InsecureSkipVerify: true,
-								VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-									fingerprint := utils.GetFingerprint(rawCerts[0])
-
-									// Validate using pre-shared fingerprint
-									if *tlsFingerprintFlag != "" {
-										if fingerprint == *tlsFingerprintFlag {
-											return nil
-										}
-
-										msg := fmt.Errorf(`@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
-Someone could be eavesdropping on you right now (man-in-the-middle attack)!
-It is also possible that a TLS certificate has just been changed.
-TLS certificate SHA1 fingerprint is %v.
-Please contact your system administrator.
-Provide correct TLS certificate fingerprint to get rid of this message.
-TLS certificate verification failed.
-`, fingerprint)
-
-										fatal <- msg
-
-										return msg
-									}
-
-									// Get known fingerprint from known_hosts
-									candidateFingerprint, err := config.GetKnownHostFingerprint(*knownHostsFile, *raddrFlag)
-									if err != nil {
-										if err.Error() == config.ErrorNoFingerprintFound {
-											// Validate SSH-style by typing yes, no or the fingerprint
-											fmt.Printf("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", *raddrFlag, fingerprint)
-
-											// Read answer
-											scanner := bufio.NewScanner(os.Stdin)
-											scanner.Scan()
-											if scanner.Err() != nil {
-												fatal <- err
-
-												return err
-											}
-
-											// Check if input is yes, the fingerprint or anything else
-											input := strings.TrimSuffix(scanner.Text(), "\n")
-											if input == "yes" || input == fingerprint {
-												// Add fingerprint to known hosts
-												if err := config.AddKnownHostFingerprint(*knownHostsFile, *raddrFlag, fingerprint); err != nil {
-													fatal <- err
-
-													return err
-												}
-
-												return nil
-											}
-										} else {
-											msg := errors.New("could not dial WebSocket: could not read from known_hosts file")
-
-											fatal <- msg
-
-											return msg
-										}
-									} else if candidateFingerprint == fingerprint {
-										// User has manually trusted cert, continue
-
-										return nil
-									} else if candidateFingerprint != fingerprint {
-										// Invalid cert
-										msg := fmt.Errorf(`@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
-@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
-Someone could be eavesdropping on you right now (man-in-the-middle attack)!
-It is also possible that a TLS certificate has just been changed.
-TLS certificate SHA1 fingerprint is %v.
-Please contact your system administrator.
-Add correct TLS certificate fingerprint in %v to get rid of this message.
-TLS certificate verification failed.
-`, fingerprint, *knownHostsFile)
-
-										fatal <- msg
-
-										return msg
-									}
-
-									// User entered "no" or wrong fingerprint
-									msg := errors.New("could not dial WebSocket: manual fingerprint validation aborted or wrong fingerprint provided")
-
-									fatal <- msg
-
-									return msg
-								},
-							}
-						} else {
-							customTransport.TLSClientConfig = &tls.Config{
-								InsecureSkipVerify: true,
-							}
-						}
+						customTransport.TLSClientConfig = utils.GetInteractiveTLSConfig(
+							*tlsInsecureSkipVerifyFlag,
+							*tlsFingerprintFlag,
+							*knownHostsFile,
+							*raddrFlag,
+							func(e error) {
+								fatal <- e
+							})
 
 						client = &http.Client{Transport: customTransport}
 					}
