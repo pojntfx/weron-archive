@@ -11,10 +11,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -24,6 +22,7 @@ var (
 	ErrorManualVerificationFailed = errors.New("manual fingerprint verification failed")
 	ErrorCouldNotReadKnownHosts   = errors.New("could not read known hosts file")
 	ErrorNoFingerprintFound       = errors.New("could not find fingerprint for address")
+	ErrorCouldNotGetUserInput     = errors.New("could not get user input")
 )
 
 const (
@@ -89,34 +88,15 @@ func GenerateTLSKeyAndCert(organization string, validity time.Duration) (keyStri
 	return keyOut.String(), certOut.String(), nil
 }
 
-func CreateFileAndLeadingDirectories(location string, content string) error {
-	// If config file does not exist, create and write to it
-	if _, err := os.Stat(location); os.IsNotExist(err) {
-		// Create leading directories
-		leadingDir, _ := filepath.Split(location)
-		if err := os.MkdirAll(leadingDir, os.ModePerm); err != nil {
-			return err
-		}
-
-		// Create file
-		out, err := os.Create(location)
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-
-		// Write to file
-		if err := ioutil.WriteFile(location, []byte(content), os.ModePerm); err != nil {
-			return err
-		}
-
-		return nil
-	}
-
-	return nil
-}
-
-func GetInteractiveTLSConfig(insecureSkipVerify bool, knownFingerprint string, knownHostsPath string, remoteAddress string, onGiveUp func(error)) *tls.Config {
+func GetInteractiveTLSConfig(
+	insecureSkipVerify bool,
+	knownFingerprint string,
+	knownHostsPath string,
+	remoteAddress string,
+	onGiveUp func(error),
+	onMessage func(string, ...interface{}),
+	onRead func(string, ...interface{}) (string, error),
+) *tls.Config {
 	if insecureSkipVerify {
 		return &tls.Config{
 			InsecureSkipVerify: true,
@@ -134,7 +114,7 @@ func GetInteractiveTLSConfig(insecureSkipVerify bool, knownFingerprint string, k
 					return nil
 				}
 
-				fmt.Printf(`%v
+				onMessage(`%v
 TLS certificate SHA1 fingerprint is %v.
 Please contact your system administrator.
 Provide correct TLS certificate fingerprint to get rid of this message.
@@ -151,19 +131,13 @@ TLS certificate verification failed.
 			if err != nil {
 				if err == ErrorNoFingerprintFound {
 					// Validate SSH-style by typing yes, no or the fingerprint
-					fmt.Printf("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", remoteAddress, fingerprint)
-
-					// Read answer
-					scanner := bufio.NewScanner(os.Stdin)
-					scanner.Scan()
-					if scanner.Err() != nil {
-						onGiveUp(ErrorFingerprintDidNotMatch)
+					input, err := onRead("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", remoteAddress, fingerprint)
+					if err != nil {
+						onGiveUp(ErrorCouldNotGetUserInput)
 
 						return err
 					}
 
-					// Check if input is yes, the fingerprint or anything else
-					input := strings.TrimSuffix(scanner.Text(), "\n")
 					if input == "yes" || input == fingerprint {
 						// Add fingerprint to known hosts
 						if err := AddKnownHostFingerprint(knownHostsPath, remoteAddress, fingerprint); err != nil {
@@ -185,7 +159,7 @@ TLS certificate verification failed.
 				return nil
 			} else if candidateFingerprint != fingerprint {
 				// Invalid cert
-				fmt.Printf(`%v
+				onMessage(`%v
 TLS certificate SHA1 fingerprint is %v.
 Please contact your system administrator.
 Add correct TLS certificate fingerprint in %v to get rid of this message.

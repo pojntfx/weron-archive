@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"flag"
@@ -112,7 +113,27 @@ func main() {
 							*raddrFlag,
 							func(e error) {
 								fatal <- e
-							})
+							},
+							func(s string, i ...interface{}) {
+								fmt.Printf(s, i...)
+							},
+							func(s string, i ...interface{}) (string, error) {
+								// Print the prompt
+								fmt.Printf(s, i...)
+
+								// Read answer
+								scanner := bufio.NewScanner(os.Stdin)
+								scanner.Scan()
+								if scanner.Err() != nil {
+									fatal <- err
+
+									return "", err
+								}
+
+								// Trim the trailing newline
+								return strings.TrimSuffix(scanner.Text(), "\n"), nil
+							},
+						)
 
 						client = &http.Client{Transport: customTransport}
 					}
@@ -544,7 +565,7 @@ func main() {
 							fatal <- err
 						}
 
-						log.Printf("Using TLS; SHA1 Fingerprint=%v", utils.GetFingerprint(cert.Certificate[0]))
+						log.Printf("TLS certificate SHA1 fingerprint is %v.", utils.GetFingerprint(cert.Certificate[0]))
 
 						fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, handler)
 					} else {
