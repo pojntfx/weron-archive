@@ -1,1 +1,1 @@
-web: weron --signaler
+web: weron --signal
