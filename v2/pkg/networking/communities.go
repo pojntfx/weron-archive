@@ -9,6 +9,12 @@ import (
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 )
 
+var (
+	ErrorDuplicateMACAddress    = errors.New("duplicate MAC address")
+	ErrorConnectionDoesNotExist = errors.New("connection with this MAC address exists")
+	ErrorCommunityDoesNotExist  = errors.New("community with this name does not exist")
+)
+
 type CommunitiesManager struct {
 	communities map[string]map[string]*websocket.Conn
 
@@ -45,7 +51,7 @@ func (m *CommunitiesManager) HandleApplication(community string, mac string, con
 
 	// Abort if MAC address is already in community
 	if _, ok := newCommunity[mac]; ok {
-		return errors.New("could not add MAC address to community: MAC address is already in community")
+		return ErrorDuplicateMACAddress
 	}
 	newCommunity[mac] = conn
 
@@ -93,7 +99,7 @@ func (m *CommunitiesManager) HandleExchange(community string, mac string, exchan
 	// Get the connection for the destination
 	destination, ok := comm[exchange.Mac]
 	if !ok {
-		return errors.New("could not use MAC address: connection with dst MAC address doesn't exist")
+		return ErrorConnectionDoesNotExist
 	}
 
 	// Swap source and destination MACs in exchange
@@ -172,12 +178,12 @@ func (m *CommunitiesManager) getCommunity(community string, mac string) (map[str
 	// Check if community exists
 	comm, ok := m.communities[community]
 	if !ok {
-		return nil, errors.New("could not access community: community doesn't exist")
+		return nil, ErrorCommunityDoesNotExist
 	}
 
 	// Check if src mac exists
 	if _, ok := comm[mac]; !ok {
-		return nil, errors.New("could not use MAC address: connection with MAC address doesn't exist")
+		return nil, ErrorConnectionDoesNotExist
 	}
 
 	return comm, nil

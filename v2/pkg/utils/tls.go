@@ -23,6 +23,7 @@ var (
 	ErrorCouldNotReadKnownHosts   = errors.New("could not read known hosts file")
 	ErrorNoFingerprintFound       = errors.New("could not find fingerprint for address")
 	ErrorCouldNotGetUserInput     = errors.New("could not get user input")
+	ErrorKnownHostsSyntax         = errors.New("syntax error in known hosts")
 )
 
 const (
@@ -203,7 +204,7 @@ func GetKnownHostFingerprint(configFileLocation string, raddr string) (string, e
 		// Split the line into address and fingerprint parts
 		parts := strings.Split(line, " ")
 		if len(parts) < 2 {
-			return "", fmt.Errorf("could not get address or fingerprint: syntax error in known_hosts in line %v", currentLine)
+			return "", fmt.Errorf("%v: in line %v", ErrorKnownHostsSyntax, currentLine)
 		}
 
 		candidateRaddr := parts[0]

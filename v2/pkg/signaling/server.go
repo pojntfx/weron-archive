@@ -17,6 +17,16 @@ const (
 	invalidMAC       = "-1"
 )
 
+var (
+	ErrorAlreadyApplied               = errors.New("cannot apply multiple times")
+	ErrorCouldNotUnmarshalJSON        = errors.New("could not unmarshal JSON")
+	ErrorCouldNotHandleApplication    = errors.New("could not handle application")
+	ErrorInvalidCommunityOrMACAddress = errors.New("invalid community or MAC address")
+	ErrorCouldNotHandleReady          = errors.New("could not handle ready")
+	ErrorInvalidMACAddress            = errors.New("invalid MAC address")
+	ErrorCouldNotHandleExited         = errors.New("could not handle exited")
+)
+
 type SignalingServer struct {
 	conns map[string]*websocket.Conn
 
@@ -83,7 +93,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 			case api.TypeApplication:
 				// Prevent duplicate application
 				if community != invalidCommunity || mac != invalidMAC {
-					fatal <- errors.New("could not handle application: already applied")
+					fatal <- ErrorAlreadyApplied
 
 					return
 				}
@@ -91,7 +101,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 				// Cast to application
 				var application api.Application
 				if err := json.Unmarshal(data, &application); err != nil {
-					fatal <- fmt.Errorf("could not parse JSON from WebSocket: %v", err.Error())
+					fatal <- fmt.Errorf("%v: %v", ErrorCouldNotUnmarshalJSON, err.Error())
 
 					return
 				}
@@ -99,7 +109,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 				// Validate incoming community and MAC address
 				incomingMAC, err := net.ParseMAC(application.Mac)
 				if application.Community == invalidCommunity || application.Mac == invalidMAC || err != nil {
-					msg := "could not handle application: invalid community or MAC"
+					msg := ErrorCouldNotHandleApplication.Error() + ": " + ErrorInvalidCommunityOrMACAddress.Error()
 					if err != nil {
 						msg += ": " + err.Error()
 					}
@@ -111,7 +121,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 
 				// Handle application
 				if err := s.onApplication(application.Community, incomingMAC.String(), conn); err != nil {
-					msg := "could not handle application: " + err.Error()
+					msg := ErrorCouldNotHandleApplication.Error() + ": " + err.Error()
 
 					// Send rejection on error
 					if err := s.onRejection(conn); err != nil {
@@ -136,7 +146,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 			case api.TypeReady:
 				// Handle ready
 				if err := s.onReady(community, mac); err != nil {
-					fatal <- fmt.Errorf("could not handle ready: %v", err)
+					fatal <- fmt.Errorf("%v: %v", ErrorCouldNotHandleReady, err)
 
 					return
 				}
@@ -150,7 +160,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 				// Cast to exchange
 				var exchange api.Exchange
 				if err := json.Unmarshal(data, &exchange); err != nil {
-					fatal <- fmt.Errorf("could not parse JSON from WebSocket: %v", err.Error())
+					fatal <- fmt.Errorf("%v: %v", ErrorCouldNotUnmarshalJSON, err.Error())
 
 					return
 				}
@@ -158,7 +168,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 				// Validate incoming MAC address
 				incomingMAC, err := net.ParseMAC(exchange.Mac)
 				if err != nil {
-					fatal <- fmt.Errorf("could not handle application: invalid MAC address: %v", err.Error())
+					fatal <- fmt.Errorf("%v: %v: %v", ErrorCouldNotHandleApplication, ErrorInvalidMACAddress, err.Error())
 
 					return
 				}
@@ -166,7 +176,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 
 				// Handle exchange
 				if err := s.onExchange(community, mac, exchange); err != nil {
-					fatal <- fmt.Errorf("could not handle ready: %v", err.Error())
+					fatal <- fmt.Errorf("%v: %v", ErrorCouldNotHandleReady, err.Error())
 
 					return
 				}
@@ -175,7 +185,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 			case api.TypeExited:
 				// Handle exited
 				if err := s.onExited(community, mac, nil); err != nil {
-					fatal <- fmt.Errorf("could not handle exited: %v", err)
+					fatal <- fmt.Errorf("%v: %v", ErrorCouldNotHandleExited, err)
 
 					return
 				}
@@ -185,7 +195,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 
 			// Other messages
 			default:
-				fatal <- fmt.Errorf("could not handle message type, received unknown message type \"%v\"", v.Type)
+				fatal <- fmt.Errorf("%v: \"%v\"", ErrorUnknownMessageType, v.Type)
 
 				return
 			}
