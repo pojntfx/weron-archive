@@ -20,9 +20,10 @@ import (
 
 	"github.com/pion/webrtc/v3"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
-	"github.com/pojntfx/weron/v2/pkg/networking"
-	"github.com/pojntfx/weron/v2/pkg/signaling"
-	"github.com/pojntfx/weron/v2/pkg/utils"
+	"github.com/pojntfx/weron/pkg/encryption"
+	"github.com/pojntfx/weron/pkg/networking"
+	"github.com/pojntfx/weron/pkg/signaling"
+	"github.com/pojntfx/weron/pkg/utils"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
@@ -94,7 +95,7 @@ func main() {
 						})
 					}
 
-					// Create the config file if it does not exist
+					// Create the utils file if it does not exist
 					if err := utils.CreateFileAndLeadingDirectories(*knownHostsFile, ""); err != nil {
 						fatal <- err
 
@@ -106,7 +107,7 @@ func main() {
 					if *tlsFingerprintFlag != "" || retryWithFingerprint || *tlsInsecureSkipVerifyFlag {
 						customTransport := http.DefaultTransport.(*http.Transport).Clone()
 
-						customTransport.TLSClientConfig = utils.GetInteractiveTLSConfig(
+						customTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
 							*tlsInsecureSkipVerifyFlag,
 							*tlsFingerprintFlag,
 							*knownHostsFile,
@@ -182,7 +183,7 @@ func main() {
 							}{mac, i}
 						},
 						func(mac string, frame []byte) {
-							frame, err = utils.Decrypt(frame, key)
+							frame, err = encryption.Decrypt(frame, key)
 							if err != nil {
 								breaker <- err
 
@@ -260,10 +261,10 @@ func main() {
 							_ = peers.HandleResignation(mac)
 						},
 						func(data []byte) ([]byte, error) {
-							return utils.Encrypt(data, key)
+							return encryption.Encrypt(data, key)
 						},
 						func(data []byte) ([]byte, error) {
-							return utils.Decrypt(data, key)
+							return encryption.Decrypt(data, key)
 						},
 					)
 					defer func() {
@@ -310,14 +311,14 @@ func main() {
 								return
 							}
 
-							dst, err := utils.GetDestination(frame)
+							dst, err := networking.GetDestination(frame)
 							if err != nil {
 								log.Println("could not get destination from frame, continuing:", err)
 
 								continue
 							}
 
-							frame, err = utils.Encrypt(frame, key)
+							frame, err = encryption.Encrypt(frame, key)
 							if err != nil {
 								breaker <- err
 
@@ -451,7 +452,7 @@ func main() {
 						_, keyExists := os.Stat(*tlsKeyFlag)
 						_, certExists := os.Stat(*tlsCertFlag)
 						if keyExists != nil || certExists != nil {
-							key, cert, err := utils.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
+							key, cert, err := encryption.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
 							if err != nil {
 								fatal <- err
 
@@ -565,7 +566,7 @@ func main() {
 							fatal <- err
 						}
 
-						log.Printf("TLS certificate SHA1 fingerprint is %v.", utils.GetFingerprint(cert.Certificate[0]))
+						log.Printf("TLS certificate SHA1 fingerprint is %v.", encryption.GetFingerprint(cert.Certificate[0]))
 
 						fatal <- http.ListenAndServeTLS(addr.String(), *tlsCertFlag, *tlsKeyFlag, handler)
 					} else {
