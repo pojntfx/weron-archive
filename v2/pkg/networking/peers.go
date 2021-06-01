@@ -14,6 +14,8 @@ const (
 
 var (
 	broadcastMAC = net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}.String()
+
+	ErrorConnectionHasNoDataChannel = errors.New("connection has no data channel")
 )
 
 type PeerManager struct {
@@ -197,7 +199,7 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 
 	for _, p := range peers {
 		if p.channel == nil {
-			return errors.New("could not access data channel: connection for data channel exists, but no data channel")
+			return ErrorConnectionHasNoDataChannel
 		}
 
 		if err := p.channel.Send(frame); err != nil {
@@ -311,7 +313,7 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 func (m *PeerManager) getConnection(mac string) (*peer, error) {
 	peers, ok := m.peers[mac]
 	if !ok {
-		return &peer{}, errors.New("could not access connection: connection with MAC address doesn't exist")
+		return &peer{}, ErrorConnectionDoesNotExist
 	}
 
 	return peers, nil

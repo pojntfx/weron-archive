@@ -14,6 +14,11 @@ import (
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 )
 
+var (
+	ErrorMACAddressRejected = errors.New("MAC address rejected")
+	ErrorUnknownMessageType = errors.New("unknown message type")
+)
+
 type SignalingClient struct {
 	conn *websocket.Conn
 
@@ -107,7 +112,7 @@ func (c *SignalingClient) Run() error {
 			switch v.Type {
 			// Admission
 			case api.TypeRejection:
-				fatal <- errors.New("could not join community: MAC address rejected")
+				fatal <- ErrorMACAddressRejected
 
 				return
 			case api.TypeAcceptance:
@@ -207,7 +212,7 @@ func (c *SignalingClient) Run() error {
 
 			// Other messages
 			default:
-				fatal <- fmt.Errorf("could not handle message type, received unknown message type \"%v\"", v.Type)
+				fatal <- fmt.Errorf("%v: \"%v\"", ErrorUnknownMessageType, v.Type)
 
 				return
 			}
