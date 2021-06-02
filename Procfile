@@ -1,1 +1,1 @@
-web: weron --signal --tlsEnabled=false
+web: weron signal --tls=false
