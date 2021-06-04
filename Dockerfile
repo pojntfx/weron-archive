@@ -11,7 +11,7 @@ RUN ./Hydrunfile
 
 # Extract the release
 RUN mkdir -p /out
-RUN cp out/release/weron/weron.linux-$(uname -m) /out/weron
+RUN cp out/release/weron.linux-$(uname -m) /out/weron
 
 # Release container
 FROM debian
