@@ -103,7 +103,7 @@ var signalCmd = &cobra.Command{
 						},
 					)
 					defer func() {
-						_ = communities.Close() // Ignored as it can be a no-op
+						_ = communities.Close() // Best effort
 					}()
 
 					signaler := signaling.NewSignalingServer(
@@ -127,7 +127,7 @@ var signalCmd = &cobra.Command{
 						},
 					)
 					defer func() {
-						_ = signaler.Close() // Ignored as it can be a no-op
+						_ = signaler.Close() // Best effort
 					}()
 
 					// Start
@@ -152,8 +152,8 @@ var signalCmd = &cobra.Command{
 
 						breaker <- nil
 
-						_ = communities.Close() // Ignored as it can be a no-op
-						_ = signaler.Close()    // Ignored as it can be a no-op
+						_ = communities.Close() // Best effort
+						_ = signaler.Close()    // Best effort
 
 						done <- struct{}{}
 					}()
