@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/google/uuid"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
@@ -29,6 +30,8 @@ var (
 
 type SignalingServer struct {
 	conns map[string]*websocket.Conn
+
+	lock sync.Mutex
 
 	onApplication func(community string, mac string, conn *websocket.Conn) error
 	onRejection   func(conn *websocket.Conn) error
@@ -59,9 +62,13 @@ func NewSignalingServer(
 }
 
 func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
-	// Register connection
+	// Create a unique ID for the connection
 	id := uuid.New()
+
+	// Register connection
+	s.lock.Lock()
 	s.conns[id.String()] = conn
+	s.lock.Unlock()
 
 	fatal := make(chan error)
 
@@ -205,7 +212,9 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 	err := <-fatal
 
 	// Remove connection
+	s.lock.Lock()
 	delete(s.conns, id.String())
+	s.lock.Unlock()
 
 	// Handle exited; ignore the error as it might be a no-op
 	_ = s.onExited(community, mac, err)
@@ -227,6 +236,9 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 }
 
 func (s *SignalingServer) Close() []error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	errors := []error{}
 
 	for _, peer := range s.conns {
