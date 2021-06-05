@@ -195,7 +195,7 @@ var joinCmd = &cobra.Command{
 					// Create core
 					adapter := networking.NewNetworkAdapter(device, viper.GetInt(mtuKey), mac)
 					defer func() {
-						_ = adapter.Close() // Ignored as it can be a no-op
+						_ = adapter.Close() // Best effort
 					}()
 
 					peers := networking.NewPeerManager(
@@ -240,7 +240,7 @@ var joinCmd = &cobra.Command{
 						},
 					)
 					defer func() {
-						_ = peers.Close() // Ignored as it can be a no-op
+						_ = peers.Close() // Best effort
 					}()
 
 					signaler := signaling.NewSignalingClient(
@@ -292,7 +292,7 @@ var joinCmd = &cobra.Command{
 						},
 					)
 					defer func() {
-						_ = signaler.Close() // Ignored as it can be a no-op
+						_ = signaler.Close() // Best effort
 					}()
 
 					// Start
@@ -303,26 +303,20 @@ var joinCmd = &cobra.Command{
 					}
 
 					cmd := exec.Command("/bin/sh", "-c", execLine)
-
 					if execLine != "" {
+						go func() {
+							if err := utils.RunInPTY(cmd); err != nil {
+								breaker <- err
 
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						cmd.SysProcAttr = &syscall.SysProcAttr{
-							Pdeathsig: syscall.SIGKILL,
-							Setpgid:   true,
-						}
+								return
+							}
+						}()
 
-						if err := cmd.Start(); err != nil {
-							breaker <- err
-
-							return
-						}
 						defer func() {
 							if cmd.Process != nil {
-								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Best effort
 
-								_ = cmd.Wait() // Ignored as it can be a no-op
+								_ = cmd.Wait() // Best effort
 							}
 						}()
 					}
@@ -411,13 +405,13 @@ var joinCmd = &cobra.Command{
 
 						breaker <- nil
 
-						_ = adapter.Close()  // Ignored as it can be a no-op
-						_ = peers.Close()    // Ignored as it can be a no-op
-						_ = signaler.Close() // Ignored as it can be a no-op
+						_ = adapter.Close()  // Best effort
+						_ = peers.Close()    // Best effort
+						_ = signaler.Close() // Best effort
 						if cmd.Process != nil {
-							_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Ignored as it can be a no-op
+							_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Best effort
 
-							_ = cmd.Wait() // Ignored as it can be a no-op
+							_ = cmd.Wait() // Best effort
 						}
 
 						done <- struct{}{}

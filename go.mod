@@ -6,6 +6,7 @@ module github.com/pojntfx/weron
 go 1.16
 
 require (
+	github.com/creack/pty v1.1.13
 	github.com/google/uuid v1.2.0
 	github.com/klauspost/compress v1.12.3 // indirect
 	github.com/magiconair/properties v1.8.5 // indirect
@@ -25,6 +26,7 @@ require (
 	golang.org/x/crypto v0.0.0-20210513164829-c07d793c2f9a // indirect
 	golang.org/x/net v0.0.0-20210525063256-abc453219eb5 // indirect
 	golang.org/x/sys v0.0.0-20210601080250-7ecdf8ef093b // indirect
+	golang.org/x/term v0.0.0-20201126162022-7de9c90e9dd1
 	gopkg.in/ini.v1 v1.62.0 // indirect
 	nhooyr.io/websocket v1.8.7
 )
