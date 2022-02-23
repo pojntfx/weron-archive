@@ -32,8 +32,9 @@ const (
 )
 
 var signalCmd = &cobra.Command{
-	Use:   "signal",
-	Short: "Start a signaling server.",
+	Use:     "signal",
+	Aliases: []string{"sig", "s"},
+	Short:   "Start a signaling server",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle lifecycle
 		fatal := make(chan error)
@@ -237,4 +238,6 @@ func init() {
 	}
 	viper.SetEnvPrefix("weron")
 	viper.AutomaticEnv()
+
+	rootCmd.AddCommand(signalCmd)
 }

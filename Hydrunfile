@@ -1,27 +1,49 @@
 #!/bin/bash
 
-# Install native dependencies
-apt update
-apt install -y curl make sudo build-essential
+set -e
 
-# Fix certificate authorities on armv7
-export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+# Test
+if [ "$1" = "test" ]; then
+    # Generate dependencies
+    make depend
 
-# Install Go
-VERSION=1.16.4
-FILE=/tmp/go.tar.gz
-if [ "$(uname -m)" = 'x86_64' ]; then
-    curl -L -o ${FILE} https://golang.org/dl/go${VERSION}.linux-amd64.tar.gz
-elif [ "$(uname -m)" = 'armv7l' ]; then
-    curl -L -o ${FILE} https://golang.org/dl/go${VERSION}.linux-armv6l.tar.gz
-else
-    curl -L -o ${FILE} https://golang.org/dl/go${VERSION}.linux-arm64.tar.gz
+    # Run tests
+    make test
+
+    exit 0
 fi
-tar -C /usr/local -xzf ${FILE}
-export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin
 
-# Install dependencies
-USER=root make depend
+# Go
+if [ "$1" = "go" ]; then
+    # Install native dependencies
+    apt update
+    apt install -y curl make
 
-# Make release
-make release
+    # Install bagop
+    curl -L -o /tmp/bagop "https://github.com/pojntfx/bagop/releases/latest/download/bagop.linux-$(uname -m)"
+    install /tmp/bagop /usr/local/bin
+
+    # Generate dependencies
+    make depend
+
+    # Build
+    CGO_ENABLED=0 bagop -j "$(nproc)" -b weron -x '(android/*|ios/*|dragonfly/*|freebsd/*|js/wasm|aix/*|illumos/*|netbsd/*|openbsd/*|plan9/*|windows/*|solaris/*)' -p 'make build/weron DST=$DST' -d out
+
+    exit 0
+fi
+
+# gccgo
+if [ "$1" = "gccgo" ]; then
+    # Install native dependencies
+    apt update
+    apt install -y curl
+
+    # Install bagccgop
+    curl -L -o /tmp/bagccgop "https://github.com/pojntfx/bagccgop/releases/latest/download/bagccgop.linux-$(uname -m)"
+    install /tmp/bagccgop /usr/local/bin
+
+    # Build
+    GOFLAGS='-gccgoflags=-static' bagccgop -x '(linux/alpha|linux/mipsle|linux/arm$|linux/arm64|linux/386|linux/amd64|linux/s390x|linux/riscv64|linux/mips|linux/ppc64|linux/ppc64le)' -j1 -b weron -n -r 'make depend' -s 'build-essential,automake' -p 'make build/weron DST=$DST' -d out
+
+    exit 0
+fi

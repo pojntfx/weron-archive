@@ -2,34 +2,17 @@
 
 Overlay networks based on WebRTC.
 
+[![hydrun CI](https://github.com/pojntfx/weron/actions/workflows/hydrun.yaml/badge.svg)](https://github.com/pojntfx/weron/actions/workflows/hydrun.yaml)
+[![Docker CI](https://github.com/pojntfx/weron/actions/workflows/docker.yaml/badge.svg)](https://github.com/pojntfx/weron/actions/workflows/docker.yaml)
+[![Matrix](https://img.shields.io/matrix/weron:matrix.org)](https://matrix.to/#/#weron:matrix.org?via=matrix.org)
+[![Binary Downloads](https://img.shields.io/github/downloads/pojntfx/weron/total?label=binary%20downloads)](https://github.com/pojntfx/weron/releases)
+
 ## Overview
 
 🚧 This project is a work-in-progress! Instructions will be added as soon as it is usable. 🚧
 
-## Installation
-
-### Containerized
-
-You can get the Docker container like so:
-
-```shell
-$ docker pull pojntfx/weron
-```
-
-### Natively
-
-If you prefer a native installation, static binaries are also available on [GitHub releases](https://github.com/pojntfx/weron/releases).
-
-You can install them like so:
-
-```shell
-$ curl -L -o /tmp/weron https://github.com/pojntfx/weron/releases/latest/download/weron.linux-$(uname -m)
-$ sudo install /tmp/weron /usr/local/bin
-$ sudo setcap cap_net_admin+ep /usr/local/bin/weron # This allows rootless execution
-```
-
 ## License
 
-weron (c) 2021 Felix Pojtinger and contributors
+weron (c) 2022 Felix Pojtinger and contributors
 
 SPDX-License-Identifier: AGPL-3.0
