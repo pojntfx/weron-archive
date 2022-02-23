@@ -48,6 +48,10 @@ func (a *NetworkAdapter) Open() (string, error) {
 
 	a.tap = tap
 
+	if err := RefreshMACAddress(a.tap.Name()); err != nil {
+		return "", err
+	}
+
 	return a.tap.Name(), nil
 }
 
