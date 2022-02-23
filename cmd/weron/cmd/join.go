@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -28,57 +27,21 @@ import (
 const (
 	raddrKey          = "raddr"
 	keyKey            = "key"
-	mtuKey            = "mtu"
 	iceKey            = "ice"
 	timeoutKey        = "timeout"
 	tlsFingerprintKey = "tls-fingerprint"
 	tlsInsecureKey    = "tls-insecure"
 	tlsHostsKey       = "tls-hosts"
 	verboseKey        = "verbose"
+	communityKey      = "community"
+	deviceNameKey     = "device-name"
 )
 
 var joinCmd = &cobra.Command{
-	Use:     "join <community>/<mac>[%<device>] [cmd]",
+	Use:     "join [cmd]",
 	Aliases: []string{"joi", "j", "c"},
 	Short:   "Join a community",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Get the URI part of the arguments
-		uri := ""
-		if len(args) > 0 {
-			uri = args[0]
-		} else {
-			return errors.New("community and MAC address are missing")
-		}
-
-		// Parse community from parts
-		uriParts := strings.Split(uri, "/")
-		community := ""
-		macAndDevice := ""
-		if len(uriParts) > 1 {
-			community = uriParts[0]
-			macAndDevice = uriParts[1]
-		} else {
-			return errors.New("MAC address is missing")
-		}
-
-		// Parse raw MAC address and device name from parts
-		macAndDeviceParts := strings.Split(macAndDevice, "%")
-		rawMAC := ""
-		device := "weron0"
-		if len(macAndDeviceParts) > 0 {
-			rawMAC = macAndDeviceParts[0]
-
-			if len(macAndDeviceParts) > 1 {
-				device = macAndDeviceParts[1]
-			}
-		}
-
-		// Check if MAC address is valid
-		mac, err := net.ParseMAC(rawMAC)
-		if err != nil {
-			return err
-		}
-
 		// Parse key
 		key := viper.GetString(keyKey)
 		if !(key == "" || len(key) == 16 || len(key) == 24 || len(key) == 32) {
@@ -97,13 +60,6 @@ var joinCmd = &cobra.Command{
 
 				go func() {
 					// Parse subsystem-specific flags
-					mac, err := net.ParseMAC(mac.String())
-					if err != nil {
-						fatal <- err
-
-						return
-					}
-
 					parsedKey := []byte(key)
 
 					stunServers := []webrtc.ICEServer{}
@@ -143,7 +99,7 @@ var joinCmd = &cobra.Command{
 								// Read answer
 								scanner := bufio.NewScanner(os.Stdin)
 								scanner.Scan()
-								if scanner.Err() != nil {
+								if err := scanner.Err(); err != nil {
 									fatal <- err
 
 									return "", err
@@ -187,7 +143,13 @@ var joinCmd = &cobra.Command{
 					})
 
 					// Create core
-					adapter := networking.NewNetworkAdapter(device, viper.GetInt(mtuKey), mac)
+					adapter := networking.NewNetworkAdapter(viper.GetString(deviceNameKey))
+					deviceName, err := adapter.Open()
+					if err != nil {
+						breaker <- err
+
+						return
+					}
 					defer func() {
 						_ = adapter.Close() // Best effort
 					}()
@@ -208,7 +170,7 @@ var joinCmd = &cobra.Command{
 								return
 							}
 
-							if err := adapter.Write(frame); err != nil {
+							if _, err := adapter.Write(frame); err != nil {
 								breaker <- err
 
 								return
@@ -237,10 +199,17 @@ var joinCmd = &cobra.Command{
 						_ = peers.Close() // Best effort
 					}()
 
+					mac, err := adapter.GetMACAddress()
+					if err != nil {
+						breaker <- err
+
+						return
+					}
+
 					signaler := signaling.NewSignalingClient(
 						conn,
 						mac.String(),
-						community,
+						viper.GetString(communityKey),
 						time.Duration(viper.GetInt(timeoutKey))*time.Second,
 						func(mac string) {
 							if err := peers.HandleIntroduction(mac); err != nil {
@@ -290,26 +259,21 @@ var joinCmd = &cobra.Command{
 					}()
 
 					// Start
-					if err := adapter.Open(); err != nil {
-						breaker <- err
-
-						return
-					}
-
 					var cmd *exec.Cmd
-					if len(args) > 1 {
+					if len(args) > 0 {
 						extraArgs := []string{}
-						if len(args) > 2 {
-							extraArgs = append(extraArgs, args[2:]...)
+						if len(args) > 1 {
+							extraArgs = append(extraArgs, args[1:]...)
 						}
 
-						cmd = exec.Command(args[1], extraArgs...)
+						cmd = exec.Command(args[0], extraArgs...)
 					}
 
 					if cmd != nil {
 						cmd.Stdin = os.Stdin
 						cmd.Stdout = os.Stdout
 						cmd.Stderr = os.Stderr
+						cmd.Args = append(cmd.Args, deviceName)
 
 						if err := cmd.Start(); err != nil {
 							breaker <- err
@@ -319,9 +283,16 @@ var joinCmd = &cobra.Command{
 					}
 
 					go func() {
+						frameSize, err := adapter.GetFrameSize()
+						if err != nil {
+							breaker <- err
+
+							return
+						}
+
 						for {
-							frame, err := adapter.Read()
-							if err != nil {
+							frame := make([]byte, frameSize)
+							if _, err := adapter.Read(frame); err != nil {
 								breaker <- err
 
 								return
@@ -405,7 +376,7 @@ var joinCmd = &cobra.Command{
 						_ = adapter.Close()  // Best effort
 						_ = peers.Close()    // Best effort
 						_ = signaler.Close() // Best effort
-						if cmd.Process != nil {
+						if cmd != nil && cmd.Process != nil {
 							_ = cmd.Process.Kill() // Best effort
 							_ = cmd.Wait()         // Best effort
 						}
@@ -455,13 +426,15 @@ func init() {
 	joinCmd.PersistentFlags().String(raddrKey, "wss://weron.herokuapp.com/", "Signaler address")
 	joinCmd.PersistentFlags().String(keyKey, "", "Key for community (16, 24 or 32 characters)")
 
-	joinCmd.PersistentFlags().Int(mtuKey, 1500, "MTU for the TAP device")
 	joinCmd.PersistentFlags().String(iceKey, "stun:stun.l.google.com:19302", "Comma-seperated list of STUN servers to use")
 	joinCmd.PersistentFlags().Int(timeoutKey, 5, "Seconds to wait for the signaler to respond")
 
 	joinCmd.PersistentFlags().String(tlsFingerprintKey, "", "Signaler TLS certificate SHA1 fingerprint")
 	joinCmd.PersistentFlags().Bool(tlsInsecureKey, false, "Skip TLS certificate validation")
 	joinCmd.PersistentFlags().String(tlsHostsKey, filepath.Join(home, ".local", "share", "weron", "etc", "lib", "weron", "known_hosts"), "Path to TLS known_hosts file")
+
+	joinCmd.PersistentFlags().String(communityKey, "community1", "Name of the community to join")
+	joinCmd.PersistentFlags().String(deviceNameKey, "", "Name to add to the created network interface (if supported by OS)")
 
 	joinCmd.PersistentFlags().Bool(verboseKey, false, "Enable verbose logging")
 
