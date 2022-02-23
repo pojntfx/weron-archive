@@ -1,4 +1,4 @@
-// +heroku install .
+// +heroku install ./cmd/weron
 // +heroku goVersion go1.17
 
 module github.com/pojntfx/weron
