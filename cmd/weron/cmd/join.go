@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/pion/webrtc/v3"
@@ -78,12 +77,6 @@ var joinCmd = &cobra.Command{
 		mac, err := net.ParseMAC(rawMAC)
 		if err != nil {
 			return err
-		}
-
-		// Parse cmd
-		execLine := ""
-		if len(args) > 1 {
-			execLine = strings.Join(args[1:], " ")
 		}
 
 		// Parse key
@@ -303,23 +296,26 @@ var joinCmd = &cobra.Command{
 						return
 					}
 
-					cmd := exec.Command("/bin/sh", "-c", execLine)
-					if execLine != "" {
-						go func() {
-							if err := utils.RunInPTY(cmd); err != nil {
-								breaker <- err
+					var cmd *exec.Cmd
+					if len(args) > 1 {
+						extraArgs := []string{}
+						if len(args) > 2 {
+							extraArgs = append(extraArgs, args[2:]...)
+						}
 
-								return
-							}
-						}()
+						cmd = exec.Command(args[1], extraArgs...)
+					}
 
-						defer func() {
-							if cmd.Process != nil {
-								_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Best effort
+					if cmd != nil {
+						cmd.Stdin = os.Stdin
+						cmd.Stdout = os.Stdout
+						cmd.Stderr = os.Stderr
 
-								_ = cmd.Wait() // Best effort
-							}
-						}()
+						if err := cmd.Start(); err != nil {
+							breaker <- err
+
+							return
+						}
 					}
 
 					go func() {
@@ -410,9 +406,8 @@ var joinCmd = &cobra.Command{
 						_ = peers.Close()    // Best effort
 						_ = signaler.Close() // Best effort
 						if cmd.Process != nil {
-							_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // Best effort
-
-							_ = cmd.Wait() // Best effort
+							_ = cmd.Process.Kill() // Best effort
+							_ = cmd.Wait()         // Best effort
 						}
 
 						done <- struct{}{}

@@ -6,7 +6,6 @@ module github.com/pojntfx/weron
 go 1.17
 
 require (
-	github.com/creack/pty v1.1.17
 	github.com/google/uuid v1.3.0
 	github.com/mdlayher/ethernet v0.0.0-20220221185849-529eae5b6118
 	github.com/pion/webrtc/v3 v3.1.24
@@ -14,7 +13,6 @@ require (
 	github.com/spf13/cobra v1.3.0
 	github.com/spf13/viper v1.10.1
 	github.com/vishvananda/netlink v1.1.0
-	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 	nhooyr.io/websocket v1.8.7
 )
 
