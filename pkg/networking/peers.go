@@ -63,6 +63,9 @@ type peer struct {
 }
 
 func (m *PeerManager) HandleIntroduction(mac string) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	c, err := m.createPeer(mac)
 	if err != nil {
 		return err
@@ -74,11 +77,16 @@ func (m *PeerManager) HandleIntroduction(mac string) error {
 
 	offer, err := c.CreateOffer(nil)
 	if err != nil {
-		_ = m.HandleResignation(mac)
+		if err := m.HandleResignation(mac); err != nil {
+			return err
+		}
 
 		return err
 	}
-	c.SetLocalDescription(offer)
+
+	if err := c.SetLocalDescription(offer); err != nil {
+		return err
+	}
 
 	m.onOffer(mac, offer)
 
@@ -86,6 +94,9 @@ func (m *PeerManager) HandleIntroduction(mac string) error {
 }
 
 func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	c, err := m.createPeer(mac)
 	if err != nil {
 		return err
@@ -104,11 +115,16 @@ func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) e
 
 	answer, err := c.CreateAnswer(nil)
 	if err != nil {
-		_ = m.HandleResignation(mac)
+		if err := m.HandleResignation(mac); err != nil {
+			return err
+		}
 
 		return err
 	}
-	c.SetLocalDescription(answer)
+
+	if err := c.SetLocalDescription(answer); err != nil {
+		return err
+	}
 
 	m.onAnswer(mac, answer)
 
@@ -203,7 +219,9 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 		}
 
 		if err := p.channel.Send(frame); err != nil {
-			_ = m.HandleResignation(mac)
+			if err := m.HandleResignation(mac); err != nil {
+				return err
+			}
 
 			return nil
 		}
@@ -213,6 +231,9 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 }
 
 func (m *PeerManager) Close() []error {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
 	errors := []error{}
 
 	for mac := range m.peers {
@@ -225,9 +246,6 @@ func (m *PeerManager) Close() []error {
 }
 
 func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
 	c, err := webrtc.NewPeerConnection(webrtc.Configuration{
 		ICEServers: m.ice,
 	})
@@ -252,7 +270,9 @@ func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 func (m *PeerManager) createDataChannel(mac string, c *webrtc.PeerConnection) error {
 	dc, err := c.CreateDataChannel(dataChannelName, nil)
 	if err != nil {
-		_ = m.HandleResignation(mac)
+		if err := m.HandleResignation(mac); err != nil {
+			return err
+		}
 
 		return err
 	}
