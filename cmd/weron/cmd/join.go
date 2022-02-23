@@ -39,8 +39,9 @@ const (
 )
 
 var joinCmd = &cobra.Command{
-	Use:   "join <community>/<mac>[%<device>] [cmd]",
-	Short: "Join a community.",
+	Use:     "join <community>/<mac>[%<device>] [cmd]",
+	Aliases: []string{"joi", "j", "c"},
+	Short:   "Join a community",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get the URI part of the arguments
 		uri := ""
@@ -475,4 +476,6 @@ func init() {
 	}
 	viper.SetEnvPrefix("weron")
 	viper.AutomaticEnv()
+
+	rootCmd.AddCommand(joinCmd)
 }

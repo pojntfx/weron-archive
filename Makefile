@@ -1,27 +1,49 @@
-all: build
+# Public variables
+DESTDIR ?=
+PREFIX ?= /usr/local
+OUTPUT_DIR ?= out
+DST ?=
 
-build:
-	go build -o out/weron main.go
+# Private variables
+obj = weron
+all: $(addprefix build/,$(obj))
 
-release:
-	CGO_ENABLED=1 go build -ldflags="-extldflags=-static" -tags netgo -o out/release/weron.linux-$$(uname -m) main.go
+# Build
+build: $(addprefix build/,$(obj))
+$(addprefix build/,$(obj)):
+ifdef DST
+	go build -o $(DST) ./cmd/$(subst build/,,$@)
+else
+	go build -o $(OUTPUT_DIR)/$(subst build/,,$@) ./cmd/$(subst build/,,$@)
+endif
 
-install: release
-	sudo install out/release/weron.linux-$$(uname -m) /usr/local/bin/weron
-	sudo setcap cap_net_admin+ep /usr/local/bin/weron
-	
-dev:
-	while [ -z "$$PID" ] || [ -n "$$(inotifywait -q -r -e modify pkg cmd main.go)" ]; do\
-		$(MAKE);\
-		kill -9 $$PID 2>/dev/null 1>&2;\
-		wait $$PID;\
-		sudo setcap cap_net_admin+ep out/weron;\
-		out/weron & export PID="$$!";\
-	done
+# Install
+install: $(addprefix install/,$(obj))
+$(addprefix install/,$(obj)):
+	install -D -m 0755 $(OUTPUT_DIR)/$(subst install/,,$@) $(DESTDIR)$(PREFIX)/bin/$(subst install/,,$@)
+	setcap cap_net_admin+ep $(DESTDIR)$(PREFIX)/bin/$(subst install/,,$@)
 
+# Uninstall
+uninstall: $(addprefix uninstall/,$(obj))
+$(addprefix uninstall/,$(obj)):
+	rm $(DESTDIR)$(PREFIX)/bin/$(subst uninstall/,,$@)
+
+# Run
+$(addprefix run/,$(obj)):
+	$(subst run/,,$@) $(ARGS)
+
+# Test
+test:
+	go test -parallel $(shell nproc) ./...
+
+# Benchmark
+benchmark:
+	go test -bench=./... ./...
+
+# Clean
 clean:
 	rm -rf out
-	rm -rf ~/.local/share/weron
 
+# Dependencies
 depend:
-	echo 0
+	exit 0
