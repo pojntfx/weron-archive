@@ -27,7 +27,7 @@ if [ "$1" = "go" ]; then
     make depend
 
     # Build
-    CGO_ENABLED=0 bagop -j "$(nproc)" -b weron -x '(android/*|ios/*|dragonfly/*|freebsd/*|js/wasm|aix/*|illumos/*|netbsd/*|openbsd/*|plan9/*|windows/*|solaris/*)' -p 'make build/weron DST=$DST' -d out
+    CGO_ENABLED=0 bagop -j "$(nproc)" -b weron -x '(android/*|ios/*|plan9/*|aix/*|js/wasm)' -p 'make build/weron DST=$DST' -d out
 
     exit 0
 fi
