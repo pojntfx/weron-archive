@@ -17,7 +17,7 @@ jobs:
         project:
           - src: .
             image: ghcr.io/pojntfx/weron
-            arch: "linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm/v8,linux/ppc64le,linux/riscv64,linux/s390x"
+            arch: "linux/386,linux/amd64,linux/arm/v6,linux/arm/v7,linux/arm/v8,linux/ppc64le,linux/s390x" # linux/riscv64
 
     steps:
       - name: Checkout
