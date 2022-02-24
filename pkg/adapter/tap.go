@@ -1,10 +1,10 @@
-package networking
+package adapter
 
 import (
-	"errors"
 	"io"
 	"net"
 
+	"github.com/pojntfx/weron/pkg/config"
 	"github.com/songgao/water"
 )
 
@@ -12,11 +12,7 @@ const (
 	ethernetHeaderLength = 14
 )
 
-var (
-	ErrAlreadyOpened = errors.New("already opened")
-)
-
-type NetworkAdapter struct {
+type TAP struct {
 	io.Writer
 
 	name string
@@ -24,19 +20,19 @@ type NetworkAdapter struct {
 	tap *water.Interface
 }
 
-func NewNetworkAdapter(name string) *NetworkAdapter {
-	return &NetworkAdapter{
+func NewTAP(name string) *TAP {
+	return &TAP{
 		name: name,
 	}
 }
 
-func (a *NetworkAdapter) Open() (string, error) {
+func (a *TAP) Open() (string, error) {
 	if a.tap != nil {
-		return "", ErrAlreadyOpened
+		return "", config.ErrAlreadyOpened
 	}
 
 	tap, err := water.New(
-		AddPlatformParameters(
+		addPlatformParameters(
 			water.Config{
 				DeviceType: water.TAP,
 			},
@@ -48,14 +44,14 @@ func (a *NetworkAdapter) Open() (string, error) {
 
 	a.tap = tap
 
-	if err := RefreshMACAddress(a.tap.Name()); err != nil {
+	if err := refreshMACAddress(a.tap.Name()); err != nil {
 		return "", err
 	}
 
 	return a.tap.Name(), nil
 }
 
-func (a *NetworkAdapter) Read(p []byte) (n int, err error) {
+func (a *TAP) Read(p []byte) (n int, err error) {
 	if a.tap == nil {
 		return -1, net.ErrClosed
 	}
@@ -63,7 +59,7 @@ func (a *NetworkAdapter) Read(p []byte) (n int, err error) {
 	return a.tap.Read(p)
 }
 
-func (a *NetworkAdapter) Write(p []byte) (n int, err error) {
+func (a *TAP) Write(p []byte) (n int, err error) {
 	if a.tap == nil {
 		return -1, net.ErrClosed
 	}
@@ -71,7 +67,7 @@ func (a *NetworkAdapter) Write(p []byte) (n int, err error) {
 	return a.tap.Write(p)
 }
 
-func (a *NetworkAdapter) Close() error {
+func (a *TAP) Close() error {
 	if a.tap == nil {
 		return nil // No-op
 	}
@@ -85,7 +81,7 @@ func (a *NetworkAdapter) Close() error {
 	return nil
 }
 
-func (a *NetworkAdapter) GetFrameSize() (int, error) {
+func (a *TAP) GetFrameSize() (int, error) {
 	if a.tap == nil {
 		return -1, net.ErrClosed
 	}
@@ -98,7 +94,7 @@ func (a *NetworkAdapter) GetFrameSize() (int, error) {
 	return iface.MTU + ethernetHeaderLength, nil
 }
 
-func (a *NetworkAdapter) GetMACAddress() (net.HardwareAddr, error) {
+func (a *TAP) GetMACAddress() (net.HardwareAddr, error) {
 	if a.tap == nil {
 		return nil, net.ErrClosed
 	}

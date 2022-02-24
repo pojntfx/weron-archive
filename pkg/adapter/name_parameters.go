@@ -1,12 +1,12 @@
 //go:build !(windows || linux || darwin)
 // +build !windows,!linux,!darwin
 
-package networking
+package adapter
 
 import (
 	"github.com/songgao/water"
 )
 
-func AddPlatformParameters(config water.Config, name string) water.Config {
+func addPlatformParameters(config water.Config, name string) water.Config {
 	return config
 }

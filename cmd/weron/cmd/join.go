@@ -14,40 +14,50 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mdlayher/ethernet"
 	"github.com/pion/webrtc/v3"
+	"github.com/pojntfx/weron/pkg/adapter"
 	"github.com/pojntfx/weron/pkg/encryption"
-	"github.com/pojntfx/weron/pkg/networking"
 	"github.com/pojntfx/weron/pkg/signaling"
-	"github.com/pojntfx/weron/pkg/utils"
+	"github.com/pojntfx/weron/pkg/transport"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"nhooyr.io/websocket"
 )
 
 const (
-	raddrKey          = "raddr"
-	keyKey            = "key"
-	iceKey            = "ice"
-	timeoutKey        = "timeout"
-	tlsFingerprintKey = "tls-fingerprint"
-	tlsInsecureKey    = "tls-insecure"
-	tlsHostsKey       = "tls-hosts"
-	verboseKey        = "verbose"
-	communityKey      = "community"
-	deviceNameKey     = "device-name"
+	raddrFlag          = "raddr"
+	keyFlag            = "key"
+	stunFlag           = "stun"
+	turnFlag           = "turn"
+	timeoutFlag        = "timeout"
+	tlsFingerprintFlag = "tls-fingerprint"
+	tlsInsecureFlag    = "tls-insecure"
+	tlsHostsFlag       = "tls-hosts"
+	communityFlag      = "community"
+	deviceNameFlag     = "device-name"
 )
 
 var joinCmd = &cobra.Command{
 	Use:     "join [cmd]",
 	Aliases: []string{"joi", "j", "c"},
 	Short:   "Join a community",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		// Parse key
-		key := viper.GetString(keyKey)
-		if !(key == "" || len(key) == 16 || len(key) == 24 || len(key) == 32) {
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := viper.BindPFlags(cmd.PersistentFlags()); err != nil {
+			return nil
+		}
+
+		if key := viper.GetString(keyFlag); !(key == "" || len(key) == 16 || len(key) == 24 || len(key) == 32) {
 			return errors.New("key is not 16, 24 or 32 characters long")
 		}
 
+		if strings.TrimSpace(viper.GetString(communityFlag)) == "" {
+			return errors.New("invalid community name")
+		}
+
+		return nil
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle lifecycle
 		fatal := make(chan error)
 		done := make(chan struct{})
@@ -60,17 +70,17 @@ var joinCmd = &cobra.Command{
 
 				go func() {
 					// Parse subsystem-specific flags
-					parsedKey := []byte(key)
+					parsedKey := []byte(viper.GetString(keyFlag))
 
 					stunServers := []webrtc.ICEServer{}
-					for _, stunServer := range strings.Split(viper.GetString(iceKey), ",") {
+					for _, stunServer := range viper.GetStringSlice(stunFlag) {
 						stunServers = append(stunServers, webrtc.ICEServer{
 							URLs: []string{stunServer},
 						})
 					}
 
-					// Create the utils file if it does not exist
-					if err := utils.CreateFileAndLeadingDirectories(viper.GetString(tlsHostsKey), ""); err != nil {
+					// Create the utils dir if it does not exist
+					if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsHostsFlag)), os.ModePerm); err != nil {
 						fatal <- err
 
 						return
@@ -78,14 +88,14 @@ var joinCmd = &cobra.Command{
 
 					// Interactively verify TLS certificate if fingerprint is given
 					client := http.DefaultClient
-					if viper.GetString(tlsFingerprintKey) != "" || retryWithFingerprint || viper.GetBool(tlsInsecureKey) {
+					if viper.GetString(tlsFingerprintFlag) != "" || retryWithFingerprint || viper.GetBool(tlsInsecureFlag) {
 						customTransport := http.DefaultTransport.(*http.Transport).Clone()
 
 						customTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
-							viper.GetBool(tlsInsecureKey),
-							viper.GetString(tlsFingerprintKey),
-							viper.GetString(tlsHostsKey),
-							viper.GetString(raddrKey),
+							viper.GetBool(tlsInsecureFlag),
+							viper.GetString(tlsFingerprintFlag),
+							viper.GetString(tlsHostsFlag),
+							viper.GetString(raddrFlag),
 							func(e error) {
 								fatal <- e
 							},
@@ -113,7 +123,7 @@ var joinCmd = &cobra.Command{
 						client = &http.Client{Transport: customTransport}
 					}
 
-					conn, _, err := websocket.Dial(context.Background(), viper.GetString(raddrKey), &websocket.DialOptions{HTTPClient: client})
+					conn, _, err := websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
 					if err != nil {
 						if strings.Contains(err.Error(), "x509:") {
 							retryWithFingerprint = true
@@ -143,7 +153,7 @@ var joinCmd = &cobra.Command{
 					})
 
 					// Create core
-					adapter := networking.NewNetworkAdapter(viper.GetString(deviceNameKey))
+					adapter := adapter.NewTAP(viper.GetString(deviceNameFlag))
 					deviceName, err := adapter.Open()
 					if err != nil {
 						breaker <- err
@@ -154,7 +164,7 @@ var joinCmd = &cobra.Command{
 						_ = adapter.Close() // Best effort
 					}()
 
-					peers := networking.NewPeerManager(
+					peers := transport.NewWebRTCManager(
 						stunServers,
 						func(mac string, i webrtc.ICECandidate) {
 							candidateChan <- struct {
@@ -209,8 +219,8 @@ var joinCmd = &cobra.Command{
 					signaler := signaling.NewSignalingClient(
 						conn,
 						mac.String(),
-						viper.GetString(communityKey),
-						time.Duration(viper.GetInt(timeoutKey))*time.Second,
+						viper.GetString(communityFlag),
+						viper.GetDuration(timeoutFlag),
 						func(mac string) {
 							if err := peers.HandleIntroduction(mac); err != nil {
 								breaker <- err
@@ -298,9 +308,9 @@ var joinCmd = &cobra.Command{
 								return
 							}
 
-							dst, err := networking.GetDestination(frame)
-							if err != nil {
-								log.Println("could not get destination from frame, continuing:", err)
+							var parsedFrame ethernet.Frame
+							if err := parsedFrame.UnmarshalBinary(frame); err != nil {
+								log.Println("could not parse frame, continuing:", err)
 
 								continue
 							}
@@ -312,8 +322,8 @@ var joinCmd = &cobra.Command{
 								return
 							}
 
-							if err := peers.Write(dst.String(), frame); err != nil {
-								if viper.GetBool(verboseKey) {
+							if err := peers.Write(parsedFrame.Destination.String(), frame); err != nil {
+								if viper.GetBool(verboseFlag) {
 									log.Println("could not write to peer, continuing:", err)
 								}
 
@@ -352,7 +362,7 @@ var joinCmd = &cobra.Command{
 						}
 					}()
 
-					log.Printf("agent connected to signaler %v", viper.GetString(raddrKey))
+					log.Printf("agent connected to signaler %v", viper.GetString(raddrFlag))
 
 					// Register interrrupt handler
 					go func() {
@@ -417,32 +427,24 @@ var joinCmd = &cobra.Command{
 }
 
 func init() {
-	// Get home directory
+	// Get default working dir
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatal("could not get home directory:", err)
+		panic(err)
 	}
+	workingDirectoryDefault := filepath.Join(home, ".local", "share", "weron", "var", "lib", "weron")
 
-	joinCmd.PersistentFlags().String(raddrKey, "wss://weron.herokuapp.com/", "Signaler address")
-	joinCmd.PersistentFlags().String(keyKey, "", "Key for community (16, 24 or 32 characters)")
+	joinCmd.PersistentFlags().StringP(raddrFlag, "r", "wss://weron.herokuapp.com/", "Signaler address")
+	joinCmd.PersistentFlags().StringP(keyFlag, "k", "", "Key for community (16, 24 or 32 characters long)")
+	joinCmd.PersistentFlags().StringSliceP(stunFlag, "s", []string{"stun:stun.l.google.com:19302"}, "Comma-seperated list of STUN servers to use")
+	joinCmd.PersistentFlags().StringSliceP(turnFlag, "t", []string{}, "Comma-seperated list of TURN servers to use (in format username:credential@turn:domain:port")
+	joinCmd.PersistentFlags().DurationP(timeoutFlag, "m", time.Second*5, "Seconds to wait for the signaler to respond")
+	joinCmd.PersistentFlags().StringP(tlsFingerprintFlag, "f", "", "Key for community (16, 24 or 32 characters long)")
+	joinCmd.PersistentFlags().BoolP(tlsInsecureFlag, "i", false, "Skip TLS certificate validation")
+	joinCmd.PersistentFlags().StringP(tlsHostsFlag, "o", filepath.Join(workingDirectoryDefault, "known_hosts"), "Path to the TLS known_hosts file")
+	joinCmd.PersistentFlags().StringP(communityFlag, "c", "", "Name of the community to join")
+	joinCmd.PersistentFlags().StringP(deviceNameFlag, "d", "", "Name to give the created network interface (if supported by the OS; if not specified, a random name will be chosen)")
 
-	joinCmd.PersistentFlags().String(iceKey, "stun:stun.l.google.com:19302", "Comma-seperated list of STUN servers to use")
-	joinCmd.PersistentFlags().Int(timeoutKey, 5, "Seconds to wait for the signaler to respond")
-
-	joinCmd.PersistentFlags().String(tlsFingerprintKey, "", "Signaler TLS certificate SHA1 fingerprint")
-	joinCmd.PersistentFlags().Bool(tlsInsecureKey, false, "Skip TLS certificate validation")
-	joinCmd.PersistentFlags().String(tlsHostsKey, filepath.Join(home, ".local", "share", "weron", "etc", "lib", "weron", "known_hosts"), "Path to TLS known_hosts file")
-
-	joinCmd.PersistentFlags().String(communityKey, "community1", "Name of the community to join")
-	joinCmd.PersistentFlags().String(deviceNameKey, "", "Name to add to the created network interface (if supported by OS)")
-
-	joinCmd.PersistentFlags().Bool(verboseKey, false, "Enable verbose logging")
-
-	// Bind env variables
-	if err := viper.BindPFlags(joinCmd.PersistentFlags()); err != nil {
-		log.Fatal("could not bind flags:", err)
-	}
-	viper.SetEnvPrefix("weron")
 	viper.AutomaticEnv()
 
 	rootCmd.AddCommand(joinCmd)

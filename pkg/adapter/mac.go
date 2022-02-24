@@ -1,8 +1,8 @@
 //go:build !(linux || darwin)
 // +build !linux,!darwin
 
-package networking
+package adapter
 
-func RefreshMACAddress(name string) error {
+func refreshMACAddress(name string) error {
 	return nil // No-op
 }

@@ -5,25 +5,18 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
 	"time"
-)
 
-var (
-	ErrorFingerprintDidNotMatch   = errors.New("fingerprint did not match")
-	ErrorManualVerificationFailed = errors.New("manual fingerprint verification failed")
-	ErrorCouldNotReadKnownHosts   = errors.New("could not read known hosts file")
-	ErrorNoFingerprintFound       = errors.New("could not find fingerprint for address")
-	ErrorCouldNotGetUserInput     = errors.New("could not get user input")
-	ErrorKnownHostsSyntax         = errors.New("syntax error in known hosts")
+	"github.com/pojntfx/weron/pkg/config"
 )
 
 const (
@@ -122,19 +115,19 @@ Provide correct TLS certificate fingerprint to get rid of this message.
 TLS certificate verification failed.
 `, SSHLikePreamble, fingerprint)
 
-				onGiveUp(ErrorFingerprintDidNotMatch)
+				onGiveUp(config.ErrFingerprintDidNotMatch)
 
-				return ErrorFingerprintDidNotMatch
+				return config.ErrFingerprintDidNotMatch
 			}
 
 			// Get known fingerprint from known_hosts
 			candidateFingerprint, err := GetKnownHostFingerprint(knownHostsPath, remoteAddress)
 			if err != nil {
-				if err == ErrorNoFingerprintFound {
+				if err == config.ErrNoFingerprintFound {
 					// Validate SSH-style by typing yes, no or the fingerprint
 					input, err := onRead("The authenticity of signaling server '%v' can't be established.\nTLS certificate SHA1 fingerprint is %v.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? ", remoteAddress, fingerprint)
 					if err != nil {
-						onGiveUp(ErrorCouldNotGetUserInput)
+						onGiveUp(config.ErrCouldNotGetUserInput)
 
 						return err
 					}
@@ -142,7 +135,7 @@ TLS certificate verification failed.
 					if input == "yes" || input == fingerprint {
 						// Add fingerprint to known hosts
 						if err := AddKnownHostFingerprint(knownHostsPath, remoteAddress, fingerprint); err != nil {
-							onGiveUp(ErrorFingerprintDidNotMatch)
+							onGiveUp(config.ErrFingerprintDidNotMatch)
 
 							return err
 						}
@@ -150,9 +143,9 @@ TLS certificate verification failed.
 						return nil
 					}
 				} else {
-					onGiveUp(ErrorCouldNotReadKnownHosts)
+					onGiveUp(config.ErrCouldNotReadKnownHosts)
 
-					return ErrorCouldNotReadKnownHosts
+					return config.ErrCouldNotReadKnownHosts
 				}
 			} else if candidateFingerprint == fingerprint {
 				// User has manually trusted cert, continue
@@ -167,23 +160,23 @@ Add correct TLS certificate fingerprint in %v to get rid of this message.
 TLS certificate verification failed.
 `, SSHLikePreamble, fingerprint, knownHostsPath)
 
-				onGiveUp(ErrorFingerprintDidNotMatch)
+				onGiveUp(config.ErrFingerprintDidNotMatch)
 
-				return ErrorFingerprintDidNotMatch
+				return config.ErrFingerprintDidNotMatch
 
 			}
 
 			// User entered !yes or wrong fingerprint
-			onGiveUp(ErrorManualVerificationFailed)
+			onGiveUp(config.ErrManualVerificationFailed)
 
-			return ErrorManualVerificationFailed
+			return config.ErrManualVerificationFailed
 		},
 	}
 }
 
 func GetKnownHostFingerprint(configFileLocation string, raddr string) (string, error) {
 	// Open config file
-	file, err := os.Open(configFileLocation)
+	file, err := os.OpenFile(configFileLocation, os.O_CREATE|os.O_RDONLY, os.ModePerm)
 	if err != nil {
 		return "", err
 	}
@@ -204,7 +197,7 @@ func GetKnownHostFingerprint(configFileLocation string, raddr string) (string, e
 		// Split the line into address and fingerprint parts
 		parts := strings.Split(line, " ")
 		if len(parts) < 2 {
-			return "", fmt.Errorf("%v: in line %v", ErrorKnownHostsSyntax, currentLine)
+			return "", fmt.Errorf("%v: in line %v", config.ErrKnownHostsSyntax, currentLine)
 		}
 
 		candidateRaddr := parts[0]
@@ -222,7 +215,7 @@ func GetKnownHostFingerprint(configFileLocation string, raddr string) (string, e
 
 	// No fingerprint found
 	if fingerprint == "" {
-		return "", ErrorNoFingerprintFound
+		return "", config.ErrNoFingerprintFound
 	}
 
 	return fingerprint, nil
@@ -230,7 +223,7 @@ func GetKnownHostFingerprint(configFileLocation string, raddr string) (string, e
 
 func AddKnownHostFingerprint(configFileLocation string, raddr string, fingerprint string) error {
 	// Open config file
-	file, err := os.OpenFile(configFileLocation, os.O_APPEND|os.O_WRONLY, 0600)
+	file, err := os.OpenFile(configFileLocation, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -240,4 +233,30 @@ func AddKnownHostFingerprint(configFileLocation string, raddr string, fingerprin
 	_, err = file.WriteString(raddr + " " + fingerprint)
 
 	return err
+}
+
+// See https://play.golang.org/p/GTxajcr3NY
+func GetFingerprint(cert []byte) string {
+	rawHash := sha1.Sum(cert)
+
+	hex := fmt.Sprintf("%x", rawHash)
+	if len(hex)%2 == 1 {
+		hex = "0" + hex
+	}
+
+	numberOfColons := len(hex)/2 - 1
+
+	colonedHex := make([]byte, len(hex)+numberOfColons)
+	for i, j := 0, 0; i < len(hex)-1; i, j = i+1, j+1 {
+		colonedHex[j] = hex[i]
+		if i%2 == 1 {
+			j++
+			colonedHex[j] = []byte(":")[0]
+		}
+	}
+
+	// We skipped the last one to avoid the colon at the end
+	colonedHex[len(colonedHex)-1] = hex[len(hex)-1]
+
+	return strings.ToUpper(string(colonedHex))
 }
