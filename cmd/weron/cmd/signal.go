@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -38,195 +37,186 @@ var signalCmd = &cobra.Command{
 		return viper.BindPFlags(cmd.PersistentFlags())
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Handle lifecycle
-		fatal := make(chan error)
-		done := make(chan struct{})
+		addr, err := net.ResolveTCPAddr("tcp", viper.GetString(laddrFlag))
+		if err != nil {
+			return err
+		}
 
-		go func() {
-			for {
-				breaker := make(chan error)
+		if port := os.Getenv("PORT"); port != "" {
+			if viper.GetBool(verboseFlag) {
+				log.Println("Using port from PORT env variable")
+			}
 
-				go func() {
-					// Parse subsystem-specific flags
-					addr, err := net.ResolveTCPAddr("tcp", viper.GetString(laddrFlag))
+			p, err := strconv.Atoi(port)
+			if err != nil {
+				return err
+			}
+
+			addr.Port = p
+		}
+
+		if viper.GetBool(tlsFlag) {
+			_, keyExists := os.Stat(viper.GetString(tlsKeyFlag))
+			_, certExists := os.Stat(viper.GetString(tlsCertFlag))
+
+			if keyExists != nil || certExists != nil {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Generating TLS cert and key")
+				}
+
+				key, cert, err := encryption.GenerateTLSKeyAndCert("weron", time.Hour*24*365)
+				if err != nil {
+					return err
+				}
+
+				for _, file := range [][2]string{
+					{key, viper.GetString(tlsKeyFlag)},
+					{cert, viper.GetString(tlsCertFlag)},
+				} {
+					if err := os.MkdirAll(filepath.Base(file[1]), os.ModePerm); err != nil {
+						return err
+					}
+
+					if err := ioutil.WriteFile(file[1], []byte(file[0]), os.ModePerm); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		communities := signaling.NewCommunitiesManager(
+			func(mac string, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling introduction for MAC", mac)
+				}
+
+				return wsjson.Write(context.Background(), conn, api.NewIntroduction(mac))
+			},
+			func(mac string, exchange api.Exchange, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling exchange for MAC", mac)
+				}
+
+				return wsjson.Write(context.Background(), conn, exchange)
+			},
+			func(mac string, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling resignation for MAC", mac)
+				}
+
+				return wsjson.Write(context.Background(), conn, api.NewResignation(mac))
+			},
+		)
+
+		signaler := signaling.NewSignalingServer(
+			func(community, mac string, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling application for community", community, "and MAC", mac)
+				}
+
+				return communities.HandleApplication(community, mac, conn)
+			},
+			func(community, mac string, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling rejection for community", community, "and MAC", mac)
+				}
+
+				return wsjson.Write(context.Background(), conn, api.NewRejection())
+			},
+			func(community, mac string, conn *websocket.Conn) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling acceptance for community", community, "and MAC", mac)
+				}
+
+				return wsjson.Write(context.Background(), conn, api.NewAcceptance())
+			},
+			func(community, mac string, err error) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling exited for community", community, "and MAC", mac)
+				}
+
+				return communities.HandleExited(community, mac, err)
+			},
+			func(community, mac string) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling ready for community", community, "and MAC", mac)
+				}
+
+				return communities.HandleReady(community, mac)
+			},
+			func(community, mac string, exchange api.Exchange) error {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling exchange for community", community, "and MAC", mac)
+				}
+
+				return communities.HandleExchange(community, mac, exchange)
+			},
+		)
+
+		log.Println("Signaler listening on", addr)
+
+		srv := &http.Server{
+			Addr: addr.String(),
+			Handler: http.HandlerFunc(
+				func(rw http.ResponseWriter, r *http.Request) {
+					conn, err := websocket.Accept(rw, r, nil)
 					if err != nil {
-						fatal <- fmt.Errorf("could not resolve address: %v", err)
+						log.Println("could not accept on WebSocket:", err)
 
 						return
 					}
 
-					// Parse PORT env variable for Heroku compatibility
-					if portEnv := os.Getenv("PORT"); portEnv != "" {
-						port, err := strconv.Atoi(portEnv)
-						if err != nil {
-							fatal <- fmt.Errorf("could not parse port: %v", port)
+					log.Println("Client with address", r.RemoteAddr, "connected")
 
-							return
-						}
+					if err := signaler.HandleConn(conn); err != nil {
+						log.Println("Client with address", r.RemoteAddr, "disconnected")
 
-						addr.Port = port
+						return
 					}
+				},
+			),
+		}
 
-					// Generate TLS cert if it doesn't exist
-					if viper.GetBool(tlsFlag) {
-						_, keyExists := os.Stat(viper.GetString(tlsKeyFlag))
-						_, certExists := os.Stat(viper.GetString(tlsCertFlag))
-						if keyExists != nil || certExists != nil {
-							key, cert, err := encryption.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
-							if err != nil {
-								fatal <- err
+		s := make(chan os.Signal)
+		signal.Notify(s, os.Interrupt)
+		go func() {
+			<-s
 
-								return
-							}
+			log.Println("Gracefully shutting down server")
 
-							if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsKeyFlag)), os.ModePerm); err != nil {
-								fatal <- err
+			if err := communities.Close(); len(err) > 1 {
+				panic(err)
+			}
 
-								return
-							}
+			if err := signaler.Close(); len(err) > 1 {
+				panic(err)
+			}
 
-							if err := ioutil.WriteFile(viper.GetString(tlsKeyFlag), []byte(key), os.ModePerm); err != nil {
-								fatal <- err
-
-								return
-							}
-
-							if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsCertFlag)), os.ModePerm); err != nil {
-								fatal <- err
-
-								return
-							}
-
-							if err := ioutil.WriteFile(viper.GetString(tlsCertFlag), []byte(cert), os.ModePerm); err != nil {
-								fatal <- err
-
-								return
-							}
-						}
-					}
-
-					// Create core
-					communities := signaling.NewCommunitiesManager(
-						func(mac string, conn *websocket.Conn) error {
-							return wsjson.Write(context.Background(), conn, api.NewIntroduction(mac))
-						},
-						func(exchange api.Exchange, conn *websocket.Conn) error {
-							return wsjson.Write(context.Background(), conn, exchange)
-						},
-						func(mac string, conn *websocket.Conn) error {
-							return wsjson.Write(context.Background(), conn, api.NewResignation(mac))
-						},
-					)
-					defer func() {
-						_ = communities.Close() // Best effort
-					}()
-
-					signaler := signaling.NewSignalingServer(
-						func(community string, mac string, conn *websocket.Conn) error {
-							return communities.HandleApplication(community, mac, conn)
-						},
-						func(conn *websocket.Conn) error {
-							return wsjson.Write(context.Background(), conn, api.NewRejection())
-						},
-						func(conn *websocket.Conn) error {
-							return wsjson.Write(context.Background(), conn, api.NewAcceptance())
-						},
-						func(community, mac string, err error) error {
-							return communities.HandleExited(community, mac, err)
-						},
-						func(community, mac string) error {
-							return communities.HandleReady(community, mac)
-						},
-						func(community, mac string, exchange api.Exchange) error {
-							return communities.HandleExchange(community, mac, exchange)
-						},
-					)
-					defer func() {
-						_ = signaler.Close() // Best effort
-					}()
-
-					// Start
-					log.Printf("signaling server listening on %v", addr.String())
-
-					// Register interrrupt handler
-					go func() {
-						s := make(chan os.Signal, 1)
-						signal.Notify(s, os.Interrupt)
-						<-s
-
-						log.Println("gracefully shutting down signaling server")
-
-						// Register secondary interrupt handler (which hard-exits)
-						go func() {
-							s := make(chan os.Signal, 1)
-							signal.Notify(s, os.Interrupt)
-							<-s
-
-							log.Fatal("cancelled graceful signaling server shutdown, exiting immediately")
-						}()
-
-						breaker <- nil
-
-						_ = communities.Close() // Best effort
-						_ = signaler.Close()    // Best effort
-
-						done <- struct{}{}
-					}()
-
-					handler := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-						conn, err := websocket.Accept(rw, r, nil)
-						if err != nil {
-							log.Println("could not accept on WebSocket:", err)
-
-							return
-						}
-
-						log.Println("client connected")
-
-						go func() {
-							if err := signaler.HandleConn(conn); err != nil {
-								log.Println("client disconnected:", err)
-
-								return
-							}
-						}()
-					})
-
-					if viper.GetBool(tlsFlag) {
-						cert, err := tls.LoadX509KeyPair(viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag))
-						if err != nil {
-							fatal <- err
-						}
-
-						log.Printf("TLS certificate SHA1 fingerprint is %v.", encryption.GetFingerprint(cert.Certificate[0]))
-
-						fatal <- http.ListenAndServeTLS(addr.String(), viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag), handler)
-					} else {
-						fatal <- http.ListenAndServe(addr.String(), handler)
-					}
-				}()
-
-				err := <-breaker
-
-				// Interrupting
-				if err == nil {
-					break
-				}
-
-				log.Println("signaling server crashed, restarting in 1s:", err)
-
-				time.Sleep(time.Second)
+			if err := srv.Shutdown(context.Background()); err != nil {
+				panic(err)
 			}
 		}()
 
-		for {
-			select {
-			case err := <-fatal:
-				log.Fatal(err)
-			case <-done:
-				os.Exit(0)
+		if viper.GetBool(tlsFlag) {
+			cert, err := tls.LoadX509KeyPair(viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag))
+			if err != nil {
+				return err
 			}
+
+			log.Println("TLS certificate SHA-1 fingerprint:", encryption.GetFingerprint(cert.Certificate[0]))
+
+			if err := srv.ListenAndServeTLS(viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag)); err != http.ErrServerClosed {
+				return err
+			}
+
+			return nil
 		}
+
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			return err
+		}
+
+		return nil
 	},
 }
 
@@ -238,7 +228,7 @@ func init() {
 	}
 	workingDirectoryDefault := filepath.Join(home, ".local", "share", "weron", "var", "lib", "weron")
 
-	signalCmd.PersistentFlags().StringP(laddrFlag, "a", ":15325", "Listen address")
+	signalCmd.PersistentFlags().StringP(laddrFlag, "a", ":15325", "Listen address (port can also be set with PORT env variable)")
 	signalCmd.PersistentFlags().BoolP(tlsFlag, "t", true, "Enable TLS")
 	signalCmd.PersistentFlags().StringP(tlsKeyFlag, "k", filepath.Join(workingDirectoryDefault, "key.pem"), "Path to the TLS private key (will be generated if it does not exist)")
 	signalCmd.PersistentFlags().StringP(tlsCertFlag, "c", filepath.Join(workingDirectoryDefault, "cert.crt"), "Path to the TLS certificate (will be generated if it does not exist)")

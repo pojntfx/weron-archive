@@ -25,8 +25,8 @@ type SignalingServer struct {
 	lock sync.Mutex
 
 	onApplication func(community string, mac string, conn *websocket.Conn) error
-	onRejection   func(conn *websocket.Conn) error
-	onAcceptance  func(conn *websocket.Conn) error
+	onRejection   func(community string, mac string, conn *websocket.Conn) error
+	onAcceptance  func(community string, mac string, conn *websocket.Conn) error
 	onExited      func(community string, mac string, err error) error
 	onReady       func(community string, mac string) error
 	onExchange    func(community string, mac string, exchange api.Exchange) error
@@ -34,8 +34,8 @@ type SignalingServer struct {
 
 func NewSignalingServer(
 	onApplication func(community string, mac string, conn *websocket.Conn) error,
-	onRejection func(conn *websocket.Conn) error,
-	onAcceptance func(conn *websocket.Conn) error,
+	onRejection func(community string, mac string, conn *websocket.Conn) error,
+	onAcceptance func(community string, mac string, conn *websocket.Conn) error,
 	onExited func(community string, mac string, err error) error,
 	onReady func(community string, mac string) error,
 	onExchange func(community string, mac string, exchange api.Exchange) error,
@@ -122,7 +122,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 					msg := config.ErrCouldNotHandleApplication.Error() + ": " + err.Error()
 
 					// Send rejection on error
-					if err := s.onRejection(conn); err != nil {
+					if err := s.onRejection(community, mac, conn); err != nil {
 						msg += ": " + err.Error()
 					}
 
@@ -136,7 +136,7 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 				mac = incomingMAC.String()
 
 				// Send acceptance
-				if err := s.onAcceptance(conn); err != nil {
+				if err := s.onAcceptance(community, mac, conn); err != nil {
 					fatal <- err
 
 					return
