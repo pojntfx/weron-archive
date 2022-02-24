@@ -38,6 +38,21 @@ const (
 	deviceNameFlag     = "device-name"
 )
 
+var (
+	errInvalidTURNServerAddr  = errors.New("invalid TURN server address")
+	errMissingTURNCredentials = errors.New("missing TURN server credentials")
+)
+
+type candidate struct {
+	mac string
+	i   webrtc.ICECandidate
+}
+
+type session struct {
+	mac string
+	o   webrtc.SessionDescription
+}
+
 var joinCmd = &cobra.Command{
 	Use:     "join [cmd]",
 	Aliases: []string{"joi", "j", "c"},
@@ -58,394 +73,278 @@ var joinCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Handle lifecycle
-		fatal := make(chan error)
-		done := make(chan struct{})
+		adapter := adapter.NewTAP(viper.GetString(deviceNameFlag))
+		deviceName, err := adapter.Open()
+		if err != nil {
+			return err
+		}
+
+		iceServers := []webrtc.ICEServer{}
+
+		for _, stunServer := range viper.GetStringSlice(stunFlag) {
+			iceServers = append(iceServers, webrtc.ICEServer{
+				URLs: []string{stunServer},
+			})
+		}
+
+		for _, turnServer := range viper.GetStringSlice(turnFlag) {
+			addrParts := strings.Split(turnServer, "@")
+			if len(addrParts) < 2 {
+				return errInvalidTURNServerAddr
+			}
+
+			authParts := strings.Split(addrParts[0], ":")
+			if len(addrParts) < 2 {
+				return errMissingTURNCredentials
+			}
+
+			iceServers = append(iceServers, webrtc.ICEServer{
+				URLs:           []string{addrParts[1]},
+				Username:       authParts[0],
+				Credential:     authParts[1],
+				CredentialType: webrtc.ICECredentialTypePassword,
+			})
+		}
+
+		candidates := make(chan candidate)
+		offers := make(chan session)
+		answers := make(chan session)
+
+		peers := transport.NewWebRTCManager(
+			iceServers,
+			func(mac string, i webrtc.ICECandidate) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling outgoing candidate for MAC", mac)
+				}
+
+				candidates <- candidate{mac, i}
+			},
+			func(mac string, frame []byte) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling outgoing frame for MAC", mac)
+				}
+
+				frame, err = encryption.Decrypt(frame, []byte(viper.GetString(keyFlag)))
+				if err != nil {
+					panic(err)
+				}
+
+				if _, err := adapter.Write(frame); err != nil {
+					panic(err)
+				}
+			},
+			func(mac string, o webrtc.SessionDescription) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling outgoing offer for MAC", mac)
+				}
+
+				offers <- session{mac, o}
+			},
+			func(mac string, o webrtc.SessionDescription) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling outgoing answer for MAC", mac)
+				}
+
+				answers <- session{mac, o}
+			},
+			func(mac string) {
+				log.Println("Peer with MAC", mac, "connected")
+			},
+			func(mac string) {
+				log.Println("Peer with MAC", mac, "disconnected")
+			},
+		)
+
+		if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsHostsFlag)), os.ModePerm); err != nil {
+			return err
+		}
+
+		httpTransport := http.DefaultTransport.(*http.Transport).Clone()
+		httpTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
+			viper.GetBool(tlsInsecureFlag),
+			viper.GetString(tlsFingerprintFlag),
+			viper.GetString(tlsHostsFlag),
+			viper.GetString(raddrFlag),
+			func(err error) {
+				panic(err)
+			},
+			cmd.Printf,
+			func(s string, i ...interface{}) (string, error) {
+				fmt.Printf(s, i...)
+
+				scanner := bufio.NewScanner(os.Stdin)
+				scanner.Scan()
+				if err := scanner.Err(); err != nil {
+					panic(err)
+				}
+
+				return strings.TrimSuffix(scanner.Text(), "\n"), nil
+			},
+		)
+		client := &http.Client{Transport: httpTransport}
+
+		conn, _, err := websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
+		if err != nil {
+			return err
+		}
+
+		mac, err := adapter.GetMACAddress()
+		if err != nil {
+			return err
+		}
+
+		signaler := signaling.NewSignalingClient(
+			conn,
+			mac.String(),
+			viper.GetString(communityFlag),
+			viper.GetDuration(timeoutFlag),
+			func(mac string) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling incoming introduction for MAC", mac)
+				}
+
+				if err := peers.HandleIntroduction(mac); err != nil {
+					panic(err)
+				}
+			},
+			func(mac string, o webrtc.SessionDescription) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling incoming offer for MAC", mac)
+				}
+
+				if err := peers.HandleOffer(mac, o); err != nil {
+					panic(err)
+				}
+			},
+			func(mac string, i webrtc.ICECandidateInit) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling incoming candidate for MAC", mac)
+				}
+
+				if err := peers.HandleCandidate(mac, i); err != nil {
+					panic(err)
+				}
+			},
+			func(mac string, o webrtc.SessionDescription) {
+				if viper.GetBool(verboseFlag) {
+					log.Println("Handling incoming answer for MAC", mac)
+				}
+
+				if err := peers.HandleAnswer(mac, o); err != nil {
+					panic(err)
+				}
+			},
+			func(mac string, blocked bool) {
+				if blocked {
+					log.Println("Blocked connection to peer", mac, "due to wrong encryption key")
+				}
+
+				// Ignore as this can be a no-op
+				_ = peers.HandleResignation(mac)
+			},
+			func(data []byte) ([]byte, error) {
+				return encryption.Encrypt(data, []byte(viper.GetString(keyFlag)))
+			},
+			func(data []byte) ([]byte, error) {
+				return encryption.Decrypt(data, []byte(viper.GetString(keyFlag)))
+			},
+		)
+
+		var command *exec.Cmd
+		if len(args) > 0 {
+			extraArgs := []string{}
+			if len(args) > 1 {
+				extraArgs = append(extraArgs, args[1:]...)
+			}
+
+			command = exec.Command(args[0], extraArgs...)
+
+			command.Stdin = os.Stdin
+			command.Stdout = os.Stdout
+			command.Stderr = os.Stderr
+			command.Args = append(command.Args, deviceName)
+
+			if err := command.Start(); err != nil {
+				return err
+			}
+		}
+
+		frameSize, err := adapter.GetFrameSize()
+		if err != nil {
+			return err
+		}
 
 		go func() {
-			retryWithFingerprint := false
-
 			for {
-				breaker := make(chan error)
-
-				go func() {
-					// Parse subsystem-specific flags
-					parsedKey := []byte(viper.GetString(keyFlag))
-
-					iceServers := []webrtc.ICEServer{}
-					for _, stunServer := range viper.GetStringSlice(stunFlag) {
-						iceServers = append(iceServers, webrtc.ICEServer{
-							URLs: []string{stunServer},
-						})
+				select {
+				case candidate := <-candidates:
+					if err := signaler.SignalCandidate(candidate.mac, candidate.i); err != nil {
+						panic(err)
 					}
-
-					for _, turnServer := range viper.GetStringSlice(turnFlag) {
-						parts := strings.Split(turnServer, "@")
-						if len(parts) < 2 {
-							fatal <- errors.New("missing authentication or domain parameters in TURN server")
-
-							return
-						}
-
-						auth := strings.Split(parts[0], ":")
-						if len(parts) < 2 {
-							fatal <- errors.New("missing username or credential parameters in TURN server")
-
-							return
-						}
-
-						iceServers = append(iceServers, webrtc.ICEServer{
-							URLs:           []string{parts[1]},
-							Username:       auth[0],
-							Credential:     auth[1],
-							CredentialType: webrtc.ICECredentialTypePassword,
-						})
+				case offer := <-offers:
+					if err := signaler.SignalOffer(offer.mac, offer.o); err != nil {
+						panic(err)
 					}
-
-					log.Println(iceServers)
-
-					// Create the utils dir if it does not exist
-					if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsHostsFlag)), os.ModePerm); err != nil {
-						fatal <- err
-
-						return
+				case answer := <-answers:
+					if err := signaler.SignalAnswer(answer.mac, answer.o); err != nil {
+						panic(err)
 					}
-
-					// Interactively verify TLS certificate if fingerprint is given
-					client := http.DefaultClient
-					if viper.GetString(tlsFingerprintFlag) != "" || retryWithFingerprint || viper.GetBool(tlsInsecureFlag) {
-						customTransport := http.DefaultTransport.(*http.Transport).Clone()
-
-						customTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
-							viper.GetBool(tlsInsecureFlag),
-							viper.GetString(tlsFingerprintFlag),
-							viper.GetString(tlsHostsFlag),
-							viper.GetString(raddrFlag),
-							func(e error) {
-								fatal <- e
-							},
-							func(s string, i ...interface{}) {
-								fmt.Printf(s, i...)
-							},
-							func(s string, i ...interface{}) (string, error) {
-								// Print the prompt
-								fmt.Printf(s, i...)
-
-								// Read answer
-								scanner := bufio.NewScanner(os.Stdin)
-								scanner.Scan()
-								if err := scanner.Err(); err != nil {
-									fatal <- err
-
-									return "", err
-								}
-
-								// Trim the trailing newline
-								return strings.TrimSuffix(scanner.Text(), "\n"), nil
-							},
-						)
-
-						client = &http.Client{Transport: customTransport}
-					}
-
-					conn, _, err := websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
-					if err != nil {
-						if strings.Contains(err.Error(), "x509:") {
-							retryWithFingerprint = true
-
-							breaker <- fmt.Errorf("")
-						}
-
-						breaker <- fmt.Errorf("could not dial WebSocket: %v", err)
-
-						return
-					}
-
-					// Handle circular dependencies
-					candidateChan := make(chan struct {
-						mac string
-						i   webrtc.ICECandidate
-					})
-
-					offerChan := make(chan struct {
-						mac string
-						o   webrtc.SessionDescription
-					})
-
-					answerChan := make(chan struct {
-						mac string
-						o   webrtc.SessionDescription
-					})
-
-					// Create core
-					adapter := adapter.NewTAP(viper.GetString(deviceNameFlag))
-					deviceName, err := adapter.Open()
-					if err != nil {
-						breaker <- err
-
-						return
-					}
-					defer func() {
-						_ = adapter.Close() // Best effort
-					}()
-
-					peers := transport.NewWebRTCManager(
-						iceServers,
-						func(mac string, i webrtc.ICECandidate) {
-							candidateChan <- struct {
-								mac string
-								i   webrtc.ICECandidate
-							}{mac, i}
-						},
-						func(mac string, frame []byte) {
-							frame, err = encryption.Decrypt(frame, parsedKey)
-							if err != nil {
-								breaker <- err
-
-								return
-							}
-
-							if _, err := adapter.Write(frame); err != nil {
-								breaker <- err
-
-								return
-							}
-						},
-						func(mac string, o webrtc.SessionDescription) {
-							offerChan <- struct {
-								mac string
-								o   webrtc.SessionDescription
-							}{mac, o}
-						},
-						func(mac string, o webrtc.SessionDescription) {
-							answerChan <- struct {
-								mac string
-								o   webrtc.SessionDescription
-							}{mac, o}
-						},
-						func(mac string) {
-							log.Println("connected to peer", mac)
-						},
-						func(mac string) {
-							log.Println("disconnected from peer", mac)
-						},
-					)
-					defer func() {
-						_ = peers.Close() // Best effort
-					}()
-
-					mac, err := adapter.GetMACAddress()
-					if err != nil {
-						breaker <- err
-
-						return
-					}
-
-					signaler := signaling.NewSignalingClient(
-						conn,
-						mac.String(),
-						viper.GetString(communityFlag),
-						viper.GetDuration(timeoutFlag),
-						func(mac string) {
-							if err := peers.HandleIntroduction(mac); err != nil {
-								breaker <- err
-
-								return
-							}
-						},
-						func(mac string, o webrtc.SessionDescription) {
-							if err := peers.HandleOffer(mac, o); err != nil {
-								breaker <- err
-
-								return
-							}
-						},
-						func(mac string, i webrtc.ICECandidateInit) {
-							if err := peers.HandleCandidate(mac, i); err != nil {
-								breaker <- err
-
-								return
-							}
-						},
-						func(mac string, o webrtc.SessionDescription) {
-							if err := peers.HandleAnswer(mac, o); err != nil {
-								breaker <- err
-
-								return
-							}
-						},
-						func(mac string, blocked bool) {
-							if blocked {
-								log.Printf("blocked connection to peer %v due to wrong key", mac)
-							}
-
-							// Ignore as this can be a no-op
-							_ = peers.HandleResignation(mac)
-						},
-						func(data []byte) ([]byte, error) {
-							return encryption.Encrypt(data, parsedKey)
-						},
-						func(data []byte) ([]byte, error) {
-							return encryption.Decrypt(data, parsedKey)
-						},
-					)
-					defer func() {
-						_ = signaler.Close() // Best effort
-					}()
-
-					// Start
-					var cmd *exec.Cmd
-					if len(args) > 0 {
-						extraArgs := []string{}
-						if len(args) > 1 {
-							extraArgs = append(extraArgs, args[1:]...)
-						}
-
-						cmd = exec.Command(args[0], extraArgs...)
-					}
-
-					if cmd != nil {
-						cmd.Stdin = os.Stdin
-						cmd.Stdout = os.Stdout
-						cmd.Stderr = os.Stderr
-						cmd.Args = append(cmd.Args, deviceName)
-
-						if err := cmd.Start(); err != nil {
-							breaker <- err
-
-							return
-						}
-					}
-
-					go func() {
-						frameSize, err := adapter.GetFrameSize()
-						if err != nil {
-							breaker <- err
-
-							return
-						}
-
-						for {
-							frame := make([]byte, frameSize)
-							if _, err := adapter.Read(frame); err != nil {
-								breaker <- err
-
-								return
-							}
-
-							var parsedFrame ethernet.Frame
-							if err := parsedFrame.UnmarshalBinary(frame); err != nil {
-								log.Println("could not parse frame, continuing:", err)
-
-								continue
-							}
-
-							frame, err = encryption.Encrypt(frame, parsedKey)
-							if err != nil {
-								breaker <- err
-
-								return
-							}
-
-							if err := peers.Write(parsedFrame.Destination.String(), frame); err != nil {
-								if viper.GetBool(verboseFlag) {
-									log.Println("could not write to peer, continuing:", err)
-								}
-
-								continue
-							}
-						}
-					}()
-
-					go func() {
-						for candidate := range candidateChan {
-							if err := signaler.SignalCandidate(candidate.mac, candidate.i); err != nil {
-								breaker <- err
-
-								return
-							}
-						}
-					}()
-
-					go func() {
-						for offer := range offerChan {
-							if err := signaler.SignalOffer(offer.mac, offer.o); err != nil {
-								breaker <- err
-
-								return
-							}
-						}
-					}()
-
-					go func() {
-						for answer := range answerChan {
-							if err := signaler.SignalAnswer(answer.mac, answer.o); err != nil {
-								breaker <- err
-
-								return
-							}
-						}
-					}()
-
-					log.Printf("agent connected to signaler %v", viper.GetString(raddrFlag))
-
-					// Register interrrupt handler
-					go func() {
-						s := make(chan os.Signal, 1)
-						signal.Notify(s, os.Interrupt)
-						<-s
-
-						log.Println("gracefully shutting down agent")
-
-						// Register secondary interrupt handler (which hard-exits)
-						go func() {
-							s := make(chan os.Signal, 1)
-							signal.Notify(s, os.Interrupt)
-							<-s
-
-							log.Fatal("cancelled graceful agent shutdown, exiting immediately")
-						}()
-
-						breaker <- nil
-
-						_ = adapter.Close()  // Best effort
-						_ = peers.Close()    // Best effort
-						_ = signaler.Close() // Best effort
-						if cmd != nil && cmd.Process != nil {
-							_ = cmd.Process.Kill() // Best effort
-							_ = cmd.Wait()         // Best effort
-						}
-
-						done <- struct{}{}
-					}()
-
-					breaker <- signaler.Run()
-				}()
-
-				err := <-breaker
-
-				// Interrupting
-				if err == nil {
-					break
 				}
-
-				// Custom error handling
-				if err.Error() == "" {
-					continue
-				}
-
-				log.Println("agent crashed, restarting in 1s:", err)
-
-				time.Sleep(time.Second)
 			}
 		}()
 
+		s := make(chan os.Signal)
+		signal.Notify(s, os.Interrupt)
+		go func() {
+			<-s
+
+			log.Println("Gracefully shutting down agent")
+
+			if err := adapter.Close(); err != nil {
+				panic(err)
+			}
+
+			if err := peers.Close(); len(err) > 1 {
+				panic(err)
+			}
+
+			if err := signaler.Close(); err != nil {
+				panic(err)
+			}
+		}()
+
+		go func() {
+			if err := signaler.Run(); err != nil {
+				panic(err)
+			}
+		}()
+
+		log.Println("Agent connected to signaler", viper.GetString(raddrFlag))
+
 		for {
-			select {
-			case err := <-fatal:
-				log.Fatal(err)
-			case <-done:
-				os.Exit(0)
+			frame := make([]byte, frameSize)
+			if _, err := adapter.Read(frame); err != nil {
+				return err
+			}
+
+			var parsedFrame ethernet.Frame
+			if err := parsedFrame.UnmarshalBinary(frame); err != nil {
+				log.Println("could not parse frame, continuing:", err)
+
+				continue
+			}
+
+			frame, err = encryption.Encrypt(frame, []byte(viper.GetString(keyFlag)))
+			if err != nil {
+				return err
+			}
+
+			if err := peers.Write(parsedFrame.Destination.String(), frame); err != nil {
+				if viper.GetBool(verboseFlag) {
+					log.Println("could not write to peer, continuing:", err)
+				}
+
+				continue
 			}
 		}
 	},

@@ -230,7 +230,7 @@ func AddKnownHostFingerprint(configFileLocation string, raddr string, fingerprin
 	defer file.Close()
 
 	// Append to file
-	_, err = file.WriteString(raddr + " " + fingerprint)
+	_, err = file.WriteString(raddr + " " + fingerprint + "\n")
 
 	return err
 }

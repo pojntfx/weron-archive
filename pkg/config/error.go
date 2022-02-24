@@ -4,7 +4,7 @@ import "errors"
 
 var (
 	ErrDuplicateMACAddress          = errors.New("duplicate MAC address")
-	ErrConnectionDoesNotExist       = errors.New("connection with this MAC address exists")
+	ErrConnectionDoesNotExist       = errors.New("connection with this MAC address does not exist")
 	ErrCommunityDoesNotExist        = errors.New("community with this name does not exist")
 	ErrAlreadyApplied               = errors.New("cannot apply multiple times")
 	ErrCouldNotUnmarshalJSON        = errors.New("could not unmarshal JSON")

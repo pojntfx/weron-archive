@@ -153,8 +153,6 @@ var signalCmd = &cobra.Command{
 			},
 		)
 
-		log.Println("Signaler listening on", addr)
-
 		srv := &http.Server{
 			Addr: addr.String(),
 			Handler: http.HandlerFunc(
@@ -196,6 +194,8 @@ var signalCmd = &cobra.Command{
 				panic(err)
 			}
 		}()
+
+		log.Println("Signaler listening on", addr)
 
 		if viper.GetBool(tlsFlag) {
 			cert, err := tls.LoadX509KeyPair(viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag))
