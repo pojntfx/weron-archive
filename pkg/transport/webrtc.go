@@ -1,4 +1,4 @@
-package networking
+package transport
 
 import (
 	"errors"
@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/pion/webrtc/v3"
+	"github.com/pojntfx/weron/pkg/config"
 )
 
 const (
@@ -18,7 +19,7 @@ var (
 	ErrorConnectionHasNoDataChannel = errors.New("connection has no data channel")
 )
 
-type PeerManager struct {
+type WebRTCManager struct {
 	peers map[string]*peer
 
 	ice  []webrtc.ICEServer
@@ -32,7 +33,7 @@ type PeerManager struct {
 	onDataChannelClose func(mac string)
 }
 
-func NewPeerManager(
+func NewWebRTCManager(
 	ice []webrtc.ICEServer,
 
 	onCandidate func(mac string, i webrtc.ICECandidate),
@@ -41,8 +42,8 @@ func NewPeerManager(
 	onAnswer func(mac string, o webrtc.SessionDescription),
 	onDataChannelOpen func(mac string),
 	onDataChannelClose func(mac string),
-) *PeerManager {
-	return &PeerManager{
+) *WebRTCManager {
+	return &WebRTCManager{
 		peers: map[string]*peer{},
 
 		ice: ice,
@@ -62,7 +63,7 @@ type peer struct {
 	candidates []webrtc.ICECandidateInit
 }
 
-func (m *PeerManager) HandleIntroduction(mac string) error {
+func (m *WebRTCManager) HandleIntroduction(mac string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -93,7 +94,7 @@ func (m *PeerManager) HandleIntroduction(mac string) error {
 	return nil
 }
 
-func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) error {
+func (m *WebRTCManager) HandleOffer(mac string, offer webrtc.SessionDescription) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -131,7 +132,7 @@ func (m *PeerManager) HandleOffer(mac string, offer webrtc.SessionDescription) e
 	return nil
 }
 
-func (m *PeerManager) HandleCandidate(mac string, candidate webrtc.ICECandidateInit) error {
+func (m *WebRTCManager) HandleCandidate(mac string, candidate webrtc.ICECandidateInit) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -151,7 +152,7 @@ func (m *PeerManager) HandleCandidate(mac string, candidate webrtc.ICECandidateI
 	return nil
 }
 
-func (m *PeerManager) HandleAnswer(mac string, answer webrtc.SessionDescription) error {
+func (m *WebRTCManager) HandleAnswer(mac string, answer webrtc.SessionDescription) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -179,7 +180,7 @@ func (m *PeerManager) HandleAnswer(mac string, answer webrtc.SessionDescription)
 	return nil
 }
 
-func (m *PeerManager) HandleResignation(mac string) error {
+func (m *WebRTCManager) HandleResignation(mac string) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -193,7 +194,7 @@ func (m *PeerManager) HandleResignation(mac string) error {
 	return c.connection.Close()
 }
 
-func (m *PeerManager) Write(mac string, frame []byte) error {
+func (m *WebRTCManager) Write(mac string, frame []byte) error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -230,7 +231,7 @@ func (m *PeerManager) Write(mac string, frame []byte) error {
 	return nil
 }
 
-func (m *PeerManager) Close() []error {
+func (m *WebRTCManager) Close() []error {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -245,7 +246,7 @@ func (m *PeerManager) Close() []error {
 	return errors
 }
 
-func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
+func (m *WebRTCManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 	c, err := webrtc.NewPeerConnection(webrtc.Configuration{
 		ICEServers: m.ice,
 	})
@@ -267,7 +268,7 @@ func (m *PeerManager) createPeer(mac string) (*webrtc.PeerConnection, error) {
 	return c, nil
 }
 
-func (m *PeerManager) createDataChannel(mac string, c *webrtc.PeerConnection) error {
+func (m *WebRTCManager) createDataChannel(mac string, c *webrtc.PeerConnection) error {
 	dc, err := c.CreateDataChannel(dataChannelName, nil)
 	if err != nil {
 		if err := m.HandleResignation(mac); err != nil {
@@ -302,7 +303,7 @@ func (m *PeerManager) createDataChannel(mac string, c *webrtc.PeerConnection) er
 	return nil
 }
 
-func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnection) error {
+func (m *WebRTCManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnection) error {
 	c.OnDataChannel(func(dc *webrtc.DataChannel) {
 		dc.OnOpen(func() {
 			m.lock.Lock()
@@ -330,10 +331,10 @@ func (m *PeerManager) subscribeToDataChannels(mac string, c *webrtc.PeerConnecti
 	return nil
 }
 
-func (m *PeerManager) getConnection(mac string) (*peer, error) {
+func (m *WebRTCManager) getConnection(mac string) (*peer, error) {
 	peers, ok := m.peers[mac]
 	if !ok {
-		return &peer{}, ErrorConnectionDoesNotExist
+		return &peer{}, config.ErrConnectionDoesNotExist
 	}
 
 	return peers, nil

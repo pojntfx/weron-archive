@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -15,9 +16,7 @@ import (
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
 	"github.com/pojntfx/weron/pkg/encryption"
-	"github.com/pojntfx/weron/pkg/networking"
 	"github.com/pojntfx/weron/pkg/signaling"
-	"github.com/pojntfx/weron/pkg/utils"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"nhooyr.io/websocket"
@@ -25,16 +24,19 @@ import (
 )
 
 const (
-	laddrKey   = "laddr"
-	tlsKey     = "tls"
-	tlsKeyKey  = "tls-key"
-	tlsCertKey = "tls-cert"
+	laddrFlag   = "laddr"
+	tlsFlag     = "tls"
+	tlsKeyFlag  = "tls-key"
+	tlsCertFlag = "tls-cert"
 )
 
 var signalCmd = &cobra.Command{
 	Use:     "signal",
 	Aliases: []string{"sig", "s"},
 	Short:   "Start a signaling server",
+	PreRunE: func(cmd *cobra.Command, args []string) error {
+		return viper.BindPFlags(cmd.PersistentFlags())
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle lifecycle
 		fatal := make(chan error)
@@ -46,7 +48,7 @@ var signalCmd = &cobra.Command{
 
 				go func() {
 					// Parse subsystem-specific flags
-					addr, err := net.ResolveTCPAddr("tcp", viper.GetString(laddrKey))
+					addr, err := net.ResolveTCPAddr("tcp", viper.GetString(laddrFlag))
 					if err != nil {
 						fatal <- fmt.Errorf("could not resolve address: %v", err)
 
@@ -66,9 +68,9 @@ var signalCmd = &cobra.Command{
 					}
 
 					// Generate TLS cert if it doesn't exist
-					if viper.GetBool(tlsKey) {
-						_, keyExists := os.Stat(viper.GetString(tlsKeyKey))
-						_, certExists := os.Stat(viper.GetString(tlsCertKey))
+					if viper.GetBool(tlsFlag) {
+						_, keyExists := os.Stat(viper.GetString(tlsKeyFlag))
+						_, certExists := os.Stat(viper.GetString(tlsCertFlag))
 						if keyExists != nil || certExists != nil {
 							key, cert, err := encryption.GenerateTLSKeyAndCert("weron", time.Duration(time.Hour*24*180))
 							if err != nil {
@@ -77,13 +79,25 @@ var signalCmd = &cobra.Command{
 								return
 							}
 
-							if err := utils.CreateFileAndLeadingDirectories(viper.GetString(tlsKeyKey), key); err != nil {
+							if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsKeyFlag)), os.ModePerm); err != nil {
 								fatal <- err
 
 								return
 							}
 
-							if err := utils.CreateFileAndLeadingDirectories(viper.GetString(tlsCertKey), cert); err != nil {
+							if err := ioutil.WriteFile(viper.GetString(tlsKeyFlag), []byte(key), os.ModePerm); err != nil {
+								fatal <- err
+
+								return
+							}
+
+							if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsCertFlag)), os.ModePerm); err != nil {
+								fatal <- err
+
+								return
+							}
+
+							if err := ioutil.WriteFile(viper.GetString(tlsCertFlag), []byte(cert), os.ModePerm); err != nil {
 								fatal <- err
 
 								return
@@ -92,7 +106,7 @@ var signalCmd = &cobra.Command{
 					}
 
 					// Create core
-					communities := networking.NewCommunitiesManager(
+					communities := signaling.NewCommunitiesManager(
 						func(mac string, conn *websocket.Conn) error {
 							return wsjson.Write(context.Background(), conn, api.NewIntroduction(mac))
 						},
@@ -178,15 +192,15 @@ var signalCmd = &cobra.Command{
 						}()
 					})
 
-					if viper.GetBool(tlsKey) {
-						cert, err := tls.LoadX509KeyPair(viper.GetString(tlsCertKey), viper.GetString(tlsKeyKey))
+					if viper.GetBool(tlsFlag) {
+						cert, err := tls.LoadX509KeyPair(viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag))
 						if err != nil {
 							fatal <- err
 						}
 
 						log.Printf("TLS certificate SHA1 fingerprint is %v.", encryption.GetFingerprint(cert.Certificate[0]))
 
-						fatal <- http.ListenAndServeTLS(addr.String(), viper.GetString(tlsCertKey), viper.GetString(tlsKeyKey), handler)
+						fatal <- http.ListenAndServeTLS(addr.String(), viper.GetString(tlsCertFlag), viper.GetString(tlsKeyFlag), handler)
 					} else {
 						fatal <- http.ListenAndServe(addr.String(), handler)
 					}
@@ -217,26 +231,18 @@ var signalCmd = &cobra.Command{
 }
 
 func init() {
-	// Get working directory
+	// Get default working dir
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Fatal("could not get home directory:", err)
+		panic(err)
 	}
-	workingDirectoryDefault := filepath.Join(home, ".local", "share", "weron", "etc", "lib", "weron")
+	workingDirectoryDefault := filepath.Join(home, ".local", "share", "weron", "var", "lib", "weron")
 
-	signalCmd.PersistentFlags().String(laddrKey, ":15325", "Listen address; the port can also be set using the PORT env variable.")
+	signalCmd.PersistentFlags().StringP(laddrFlag, "a", ":15325", "Listen address")
+	signalCmd.PersistentFlags().BoolP(tlsFlag, "t", true, "Enable TLS")
+	signalCmd.PersistentFlags().StringP(tlsKeyFlag, "k", filepath.Join(workingDirectoryDefault, "key.pem"), "Path to the TLS private key (will be generated if it does not exist)")
+	signalCmd.PersistentFlags().StringP(tlsCertFlag, "c", filepath.Join(workingDirectoryDefault, "cert.crt"), "Path to the TLS certificate (will be generated if it does not exist)")
 
-	signalCmd.PersistentFlags().Bool(tlsKey, true, "Enable TLS")
-	signalCmd.PersistentFlags().String(tlsKeyKey, filepath.Join(workingDirectoryDefault, "key.pem"), "Path to TLS key; will be generated if it does not exist")
-	signalCmd.PersistentFlags().String(tlsCertKey, filepath.Join(workingDirectoryDefault, "cert.pem"), "Path to TLS certificate; will be generated if it does not exist")
-
-	signalCmd.PersistentFlags().Bool(verboseKey, false, "Enable verbose logging")
-
-	// Bind env variables
-	if err := viper.BindPFlags(signalCmd.PersistentFlags()); err != nil {
-		log.Fatal("could not bind flags:", err)
-	}
-	viper.SetEnvPrefix("weron")
 	viper.AutomaticEnv()
 
 	rootCmd.AddCommand(signalCmd)

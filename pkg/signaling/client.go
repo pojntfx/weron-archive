@@ -3,7 +3,6 @@ package signaling
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -12,11 +11,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
-)
-
-var (
-	ErrorMACAddressRejected = errors.New("MAC address rejected")
-	ErrorUnknownMessageType = errors.New("unknown message type")
+	"github.com/pojntfx/weron/pkg/config"
 )
 
 type SignalingClient struct {
@@ -112,7 +107,7 @@ func (c *SignalingClient) Run() error {
 			switch v.Type {
 			// Admission
 			case api.TypeRejection:
-				fatal <- ErrorMACAddressRejected
+				fatal <- config.ErrMACAddressRejected
 
 				return
 			case api.TypeAcceptance:
@@ -212,7 +207,7 @@ func (c *SignalingClient) Run() error {
 
 			// Other messages
 			default:
-				fatal <- fmt.Errorf("%v: \"%v\"", ErrorUnknownMessageType, v.Type)
+				fatal <- fmt.Errorf("%v: \"%v\"", config.ErrUnknownMessageType, v.Type)
 
 				return
 			}

@@ -1,18 +1,12 @@
-package networking
+package signaling
 
 import (
-	"errors"
 	"sync"
 
 	"nhooyr.io/websocket"
 
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
-)
-
-var (
-	ErrorDuplicateMACAddress    = errors.New("duplicate MAC address")
-	ErrorConnectionDoesNotExist = errors.New("connection with this MAC address exists")
-	ErrorCommunityDoesNotExist  = errors.New("community with this name does not exist")
+	"github.com/pojntfx/weron/pkg/config"
 )
 
 type CommunitiesManager struct {
@@ -51,7 +45,7 @@ func (m *CommunitiesManager) HandleApplication(community string, mac string, con
 
 	// Abort if MAC address is already in community
 	if _, ok := newCommunity[mac]; ok {
-		return ErrorDuplicateMACAddress
+		return config.ErrDuplicateMACAddress
 	}
 	newCommunity[mac] = conn
 
@@ -99,7 +93,7 @@ func (m *CommunitiesManager) HandleExchange(community string, mac string, exchan
 	// Get the connection for the destination
 	destination, ok := comm[exchange.Mac]
 	if !ok {
-		return ErrorConnectionDoesNotExist
+		return config.ErrConnectionDoesNotExist
 	}
 
 	// Swap source and destination MACs in exchange
@@ -178,12 +172,12 @@ func (m *CommunitiesManager) getCommunity(community string, mac string) (map[str
 	// Check if community exists
 	comm, ok := m.communities[community]
 	if !ok {
-		return nil, ErrorCommunityDoesNotExist
+		return nil, config.ErrCommunityDoesNotExist
 	}
 
 	// Check if src mac exists
 	if _, ok := comm[mac]; !ok {
-		return nil, ErrorConnectionDoesNotExist
+		return nil, config.ErrConnectionDoesNotExist
 	}
 
 	return comm, nil

@@ -1,11 +1,11 @@
 //go:build linux || darwin
 // +build linux darwin
 
-package networking
+package adapter
 
 import "github.com/vishvananda/netlink"
 
-func RefreshMACAddress(name string) error {
+func refreshMACAddress(name string) error {
 	link, err := netlink.LinkByName(name)
 	if err != nil {
 		return err
