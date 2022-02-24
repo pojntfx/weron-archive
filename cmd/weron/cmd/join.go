@@ -72,12 +72,37 @@ var joinCmd = &cobra.Command{
 					// Parse subsystem-specific flags
 					parsedKey := []byte(viper.GetString(keyFlag))
 
-					stunServers := []webrtc.ICEServer{}
+					iceServers := []webrtc.ICEServer{}
 					for _, stunServer := range viper.GetStringSlice(stunFlag) {
-						stunServers = append(stunServers, webrtc.ICEServer{
+						iceServers = append(iceServers, webrtc.ICEServer{
 							URLs: []string{stunServer},
 						})
 					}
+
+					for _, turnServer := range viper.GetStringSlice(turnFlag) {
+						parts := strings.Split(turnServer, "@")
+						if len(parts) < 2 {
+							fatal <- errors.New("missing authentication or domain parameters in TURN server")
+
+							return
+						}
+
+						auth := strings.Split(parts[0], ":")
+						if len(parts) < 2 {
+							fatal <- errors.New("missing username or credential parameters in TURN server")
+
+							return
+						}
+
+						iceServers = append(iceServers, webrtc.ICEServer{
+							URLs:           []string{parts[1]},
+							Username:       auth[0],
+							Credential:     auth[1],
+							CredentialType: webrtc.ICECredentialTypePassword,
+						})
+					}
+
+					log.Println(iceServers)
 
 					// Create the utils dir if it does not exist
 					if err := os.MkdirAll(filepath.Dir(viper.GetString(tlsHostsFlag)), os.ModePerm); err != nil {
@@ -165,7 +190,7 @@ var joinCmd = &cobra.Command{
 					}()
 
 					peers := transport.NewWebRTCManager(
-						stunServers,
+						iceServers,
 						func(mac string, i webrtc.ICECandidate) {
 							candidateChan <- struct {
 								mac string
@@ -437,7 +462,7 @@ func init() {
 	joinCmd.PersistentFlags().StringP(raddrFlag, "r", "wss://weron.herokuapp.com/", "Signaler address")
 	joinCmd.PersistentFlags().StringP(keyFlag, "k", "", "Key for community (16, 24 or 32 characters long)")
 	joinCmd.PersistentFlags().StringSliceP(stunFlag, "s", []string{"stun:stun.l.google.com:19302"}, "Comma-seperated list of STUN servers to use")
-	joinCmd.PersistentFlags().StringSliceP(turnFlag, "t", []string{}, "Comma-seperated list of TURN servers to use (in format username:credential@turn:domain:port")
+	joinCmd.PersistentFlags().StringSliceP(turnFlag, "t", []string{}, "Comma-seperated list of TURN servers to use (i.e. username:credential@turn:global.turn.twilio.com:3478?transport=tcp")
 	joinCmd.PersistentFlags().DurationP(timeoutFlag, "m", time.Second*5, "Seconds to wait for the signaler to respond")
 	joinCmd.PersistentFlags().StringP(tlsFingerprintFlag, "f", "", "Key for community (16, 24 or 32 characters long)")
 	joinCmd.PersistentFlags().BoolP(tlsInsecureFlag, "i", false, "Skip TLS certificate validation")
