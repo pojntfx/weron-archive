@@ -15,13 +15,13 @@ type CommunitiesManager struct {
 	lock sync.Mutex
 
 	onIntroduction func(mac string, conn *websocket.Conn) error
-	onExchange     func(exchange api.Exchange, conn *websocket.Conn) error
+	onExchange     func(mac string, exchange api.Exchange, conn *websocket.Conn) error
 	onResignation  func(mac string, conn *websocket.Conn) error
 }
 
 func NewCommunitiesManager(
 	onIntroduction func(mac string, conn *websocket.Conn) error,
-	onExchange func(exchange api.Exchange, conn *websocket.Conn) error,
+	onExchange func(mac string, exchange api.Exchange, conn *websocket.Conn) error,
 	onResignation func(mac string, conn *websocket.Conn) error,
 ) *CommunitiesManager {
 	return &CommunitiesManager{
@@ -100,7 +100,7 @@ func (m *CommunitiesManager) HandleExchange(community string, mac string, exchan
 	exchange.Mac = mac
 
 	// Send exchange
-	if err := m.onExchange(exchange, destination); err != nil {
+	if err := m.onExchange(mac, exchange, destination); err != nil {
 		return err
 	}
 
