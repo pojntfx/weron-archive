@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	api "github.com/pojntfx/weron/pkg/api/websockets/v1"
@@ -24,6 +25,9 @@ type SignalingServer struct {
 
 	lock sync.Mutex
 
+	ctx     context.Context
+	timeout time.Duration
+
 	onApplication func(community string, mac string, conn *websocket.Conn) error
 	onRejection   func(community string, mac string, conn *websocket.Conn) error
 	onAcceptance  func(community string, mac string, conn *websocket.Conn) error
@@ -33,6 +37,9 @@ type SignalingServer struct {
 }
 
 func NewSignalingServer(
+	ctx context.Context,
+	timeout time.Duration,
+
 	onApplication func(community string, mac string, conn *websocket.Conn) error,
 	onRejection func(community string, mac string, conn *websocket.Conn) error,
 	onAcceptance func(community string, mac string, conn *websocket.Conn) error,
@@ -42,6 +49,9 @@ func NewSignalingServer(
 ) *SignalingServer {
 	return &SignalingServer{
 		conns: map[string]*websocket.Conn{},
+
+		ctx:     ctx,
+		timeout: timeout,
 
 		onApplication: onApplication,
 		onRejection:   onRejection,
@@ -67,10 +77,28 @@ func (s *SignalingServer) HandleConn(conn *websocket.Conn) error {
 	community := invalidCommunity
 	mac := invalidMAC
 
+	keepalive := time.NewTicker(s.timeout)
+	defer keepalive.Stop()
+	go func() {
+		for range keepalive.C {
+			ctx, cancel := context.WithTimeout(s.ctx, s.timeout)
+
+			err := conn.Ping(ctx)
+			cancel()
+
+			// If ping failed, remove connection
+			if err != nil {
+				fatal <- err
+
+				return
+			}
+		}
+	}()
+
 	go func() {
 		for {
 			// Read message from connection
-			_, data, err := conn.Read(context.Background())
+			_, data, err := conn.Read(s.ctx)
 			if err != nil {
 				fatal <- err
 

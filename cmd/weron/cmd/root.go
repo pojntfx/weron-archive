@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,6 +29,7 @@ https://github.com/pojntfx/weron.`,
 
 func Execute() error {
 	rootCmd.PersistentFlags().BoolP(verboseFlag, "v", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().DurationP(timeoutFlag, "m", time.Second*5, "Duration between reconnects and pings")
 
 	if err := viper.BindPFlags(rootCmd.PersistentFlags()); err != nil {
 		return err
