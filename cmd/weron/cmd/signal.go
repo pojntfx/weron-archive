@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -37,6 +38,11 @@ var signalCmd = &cobra.Command{
 		return viper.BindPFlags(cmd.PersistentFlags())
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
+		sleep := viper.GetDuration(timeoutFlag) + time.Duration(time.Second*time.Duration(rand.Intn(5)))
+
+		ctx, cancelGlobal := context.WithCancel(context.Background())
+		defer cancelGlobal()
+
 		addr, err := net.ResolveTCPAddr("tcp", viper.GetString(laddrFlag))
 		if err != nil {
 			return err
@@ -90,25 +96,37 @@ var signalCmd = &cobra.Command{
 					log.Println("Handling introduction for MAC", mac)
 				}
 
-				return wsjson.Write(context.Background(), conn, api.NewIntroduction(mac))
+				ctx, cancel := context.WithTimeout(ctx, sleep)
+				defer cancel()
+
+				return wsjson.Write(ctx, conn, api.NewIntroduction(mac))
 			},
 			func(mac string, exchange api.Exchange, conn *websocket.Conn) error {
 				if viper.GetBool(verboseFlag) {
 					log.Println("Handling exchange for MAC", mac)
 				}
 
-				return wsjson.Write(context.Background(), conn, exchange)
+				ctx, cancel := context.WithTimeout(ctx, sleep)
+				defer cancel()
+
+				return wsjson.Write(ctx, conn, exchange)
 			},
 			func(mac string, conn *websocket.Conn) error {
 				if viper.GetBool(verboseFlag) {
 					log.Println("Handling resignation for MAC", mac)
 				}
 
-				return wsjson.Write(context.Background(), conn, api.NewResignation(mac))
+				ctx, cancel := context.WithTimeout(ctx, sleep)
+				defer cancel()
+
+				return wsjson.Write(ctx, conn, api.NewResignation(mac))
 			},
 		)
 
 		signaler := signaling.NewSignalingServer(
+			ctx,
+			sleep,
+
 			func(community, mac string, conn *websocket.Conn) error {
 				if viper.GetBool(verboseFlag) {
 					log.Println("Handling application for community", community, "and MAC", mac)
@@ -121,14 +139,20 @@ var signalCmd = &cobra.Command{
 					log.Println("Handling rejection for community", community, "and MAC", mac)
 				}
 
-				return wsjson.Write(context.Background(), conn, api.NewRejection())
+				ctx, cancel := context.WithTimeout(ctx, sleep)
+				defer cancel()
+
+				return wsjson.Write(ctx, conn, api.NewRejection())
 			},
 			func(community, mac string, conn *websocket.Conn) error {
 				if viper.GetBool(verboseFlag) {
 					log.Println("Handling acceptance for community", community, "and MAC", mac)
 				}
 
-				return wsjson.Write(context.Background(), conn, api.NewAcceptance())
+				ctx, cancel := context.WithTimeout(ctx, sleep)
+				defer cancel()
+
+				return wsjson.Write(ctx, conn, api.NewAcceptance())
 			},
 			func(community, mac string, err error) error {
 				if viper.GetBool(verboseFlag) {
@@ -182,6 +206,16 @@ var signalCmd = &cobra.Command{
 
 			log.Println("Gracefully shutting down server")
 
+			s := make(chan os.Signal)
+			signal.Notify(s, os.Interrupt)
+			go func() {
+				<-s
+
+				log.Println("Forcing shutdown of server")
+
+				cancelGlobal()
+			}()
+
 			if err := communities.Close(); len(err) > 1 {
 				panic(err)
 			}
@@ -190,9 +224,14 @@ var signalCmd = &cobra.Command{
 				panic(err)
 			}
 
-			if err := srv.Shutdown(context.Background()); err != nil {
+			ctx, cancel := context.WithTimeout(ctx, sleep)
+			defer cancel()
+
+			if err := srv.Shutdown(ctx); err != nil {
 				panic(err)
 			}
+
+			cancelGlobal()
 		}()
 
 		log.Println("Signaler listening on", addr)

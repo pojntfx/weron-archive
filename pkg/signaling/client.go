@@ -19,7 +19,9 @@ type SignalingClient struct {
 
 	mac       string
 	community string
-	timeout   time.Duration
+
+	ctx     context.Context
+	timeout time.Duration
 
 	onIntroduction func(mac string)
 	onOffer        func(mac string, o webrtc.SessionDescription)
@@ -35,6 +37,8 @@ func NewSignalingClient(
 
 	mac string,
 	community string,
+
+	ctx context.Context,
 	timeout time.Duration,
 
 	onIntroduction func(mac string),
@@ -50,7 +54,9 @@ func NewSignalingClient(
 
 		mac:       mac,
 		community: community,
-		timeout:   timeout,
+
+		ctx:     ctx,
+		timeout: timeout,
 
 		onIntroduction: onIntroduction,
 		onOffer:        onOffer,
@@ -66,12 +72,12 @@ func (c *SignalingClient) Run() error {
 	fatal := make(chan error)
 	ready := make(chan struct{})
 
-	keepalive := time.NewTicker(10 * time.Second)
+	keepalive := time.NewTicker(c.timeout)
 	defer keepalive.Stop()
 
 	go func() {
 		for range keepalive.C {
-			ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+			ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
 
 			err := c.conn.Ping(ctx)
 			cancel()
@@ -88,7 +94,7 @@ func (c *SignalingClient) Run() error {
 	go func() {
 		for {
 			// Read message from connection
-			_, data, err := c.conn.Read(context.Background())
+			_, data, err := c.conn.Read(c.ctx)
 			if err != nil {
 				fatal <- err
 
@@ -215,8 +221,11 @@ func (c *SignalingClient) Run() error {
 	}()
 
 	go func() {
+		ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
+		defer cancel()
+
 		// Send application
-		if err := wsjson.Write(context.Background(), c.conn, api.NewApplication(c.community, c.mac)); err != nil {
+		if err := wsjson.Write(ctx, c.conn, api.NewApplication(c.community, c.mac)); err != nil {
 			fatal <- err
 
 			return
@@ -227,7 +236,10 @@ func (c *SignalingClient) Run() error {
 		// Send ready
 		readyMessage := api.NewReady()
 
-		if err := wsjson.Write(context.Background(), c.conn, readyMessage); err != nil {
+		ctx, cancelWrite := context.WithTimeout(c.ctx, c.timeout)
+		defer cancelWrite()
+
+		if err := wsjson.Write(ctx, c.conn, readyMessage); err != nil {
 			fatal <- err
 		}
 	}()
@@ -244,7 +256,10 @@ func (c *SignalingClient) SignalCandidate(mac string, i webrtc.ICECandidate) err
 		return err
 	}
 
-	return wsjson.Write(context.Background(), c.conn, api.NewCandidate(mac, payload))
+	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
+	defer cancel()
+
+	return wsjson.Write(ctx, c.conn, api.NewCandidate(mac, payload))
 }
 
 func (c *SignalingClient) SignalOffer(mac string, o webrtc.SessionDescription) error {
@@ -259,7 +274,10 @@ func (c *SignalingClient) SignalOffer(mac string, o webrtc.SessionDescription) e
 		return err
 	}
 
-	return wsjson.Write(context.Background(), c.conn, api.NewOffer(mac, payload))
+	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
+	defer cancel()
+
+	return wsjson.Write(ctx, c.conn, api.NewOffer(mac, payload))
 }
 
 func (c *SignalingClient) SignalAnswer(mac string, o webrtc.SessionDescription) error {
@@ -274,7 +292,10 @@ func (c *SignalingClient) SignalAnswer(mac string, o webrtc.SessionDescription) 
 		return err
 	}
 
-	return wsjson.Write(context.Background(), c.conn, api.NewAnswer(mac, payload))
+	ctx, cancel := context.WithTimeout(c.ctx, c.timeout)
+	defer cancel()
+
+	return wsjson.Write(ctx, c.conn, api.NewAnswer(mac, payload))
 }
 
 func (c *SignalingClient) Close() error {

@@ -82,6 +82,11 @@ var joinCmd = &cobra.Command{
 		var signaler *signaling.SignalingClient
 
 		for {
+			sleep := viper.GetDuration(timeoutFlag) + time.Duration(time.Second*time.Duration(rand.Intn(5)))
+
+			ctx, cancelGlobal := context.WithCancel(context.Background())
+			defer cancelGlobal()
+
 			fatal := make(chan error)
 
 			var cleanup func() []error
@@ -192,7 +197,7 @@ var joinCmd = &cobra.Command{
 				var conn *websocket.Conn
 				retryWithFingerprint := false
 				for {
-					client := &http.Client{Timeout: viper.GetDuration(timeoutFlag)}
+					client := &http.Client{Timeout: sleep}
 					if viper.GetString(tlsFingerprintFlag) != "" || retryWithFingerprint || viper.GetBool(tlsInsecureFlag) {
 						httpTransport := http.DefaultTransport.(*http.Transport).Clone()
 						httpTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
@@ -219,14 +224,23 @@ var joinCmd = &cobra.Command{
 						client.Transport = httpTransport
 					}
 
+					ctx, cancel := context.WithTimeout(ctx, sleep)
+					defer cancel()
+
+					log.Println("Agent connecting to signaler", viper.GetString(raddrFlag))
+
 					var err error
-					conn, _, err = websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
+					conn, _, err = websocket.Dial(ctx, viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
 					if err != nil {
 						if strings.Contains(err.Error(), "x509:") {
 							retryWithFingerprint = true
 
 							continue
 						}
+
+						log.Println("Agent crashed, restarting in", sleep.String()+":", err)
+
+						time.Sleep(sleep)
 
 						continue
 					}
@@ -245,7 +259,10 @@ var joinCmd = &cobra.Command{
 					conn,
 					mac.String(),
 					viper.GetString(communityFlag),
-					viper.GetDuration(timeoutFlag),
+
+					ctx,
+					sleep,
+
 					func(mac string) {
 						if viper.GetBool(verboseFlag) {
 							log.Println("Handling incoming introduction for MAC", mac)
@@ -313,7 +330,7 @@ var joinCmd = &cobra.Command{
 						extraArgs = append(extraArgs, args[1:]...)
 					}
 
-					command = exec.Command(args[0], extraArgs...)
+					command = exec.CommandContext(ctx, args[0], extraArgs...)
 
 					command.Stdin = os.Stdin
 					command.Stdout = os.Stdout
@@ -325,6 +342,20 @@ var joinCmd = &cobra.Command{
 
 						return
 					}
+
+					go func() {
+						if err := command.Wait(); err != nil {
+							fatal <- err
+
+							return
+						}
+
+						if !command.ProcessState.Success() {
+							fatal <- err
+
+							return
+						}
+					}()
 				}
 
 				frameSize, err := tap.GetFrameSize()
@@ -426,6 +457,16 @@ var joinCmd = &cobra.Command{
 
 				log.Println("Gracefully shutting down agent")
 
+				s := make(chan os.Signal)
+				signal.Notify(s, os.Interrupt)
+				go func() {
+					<-s
+
+					log.Println("Forcing shutdown of agent")
+
+					cancelGlobal()
+				}()
+
 				done = true
 				fatal <- nil
 
@@ -433,6 +474,8 @@ var joinCmd = &cobra.Command{
 					// Ignore as this can be a no-op
 					_ = cleanup()
 				}
+
+				cancelGlobal()
 			}()
 
 			err := <-fatal
@@ -444,8 +487,6 @@ var joinCmd = &cobra.Command{
 			if err == nil {
 				return nil
 			}
-
-			sleep := viper.GetDuration(timeoutFlag) + time.Duration(time.Second*time.Duration(rand.Intn(5)))
 
 			log.Println("Agent crashed, restarting in", sleep.String()+":", err)
 
@@ -471,7 +512,6 @@ func init() {
 	joinCmd.PersistentFlags().StringP(keyFlag, "k", "", "Key for community (16, 24 or 32 characters long)")
 	joinCmd.PersistentFlags().StringSliceP(stunFlag, "s", []string{"stun:stun.l.google.com:19302"}, "Comma-seperated list of STUN servers to use")
 	joinCmd.PersistentFlags().StringSliceP(turnFlag, "t", []string{}, "Comma-seperated list of TURN servers to use (i.e. username:credential@turn:global.turn.twilio.com:3478?transport=tcp")
-	joinCmd.PersistentFlags().DurationP(timeoutFlag, "m", time.Second*5, "Seconds to wait for the signaler to respond")
 	joinCmd.PersistentFlags().StringP(tlsFingerprintFlag, "f", "", "Key for community (16, 24 or 32 characters long)")
 	joinCmd.PersistentFlags().BoolP(tlsInsecureFlag, "i", false, "Skip TLS certificate validation")
 	joinCmd.PersistentFlags().StringP(tlsHostsFlag, "o", filepath.Join(workingDirectoryDefault, "known_hosts"), "Path to the TLS known_hosts file")
