@@ -339,19 +339,21 @@ var joinCmd = &cobra.Command{
 					command.Args = append(command.Args, deviceName)
 
 					if err := command.Start(); err != nil {
-						fatal <- err
-
-						return
-					}
-
-					go func() {
-						if err := command.Wait(); err != nil {
+						if !viper.GetBool(canExitFlag) {
 							fatal <- err
 
 							return
 						}
+					}
 
+					go func() {
 						if !viper.GetBool(canExitFlag) {
+							if err := command.Wait(); err != nil {
+								fatal <- err
+
+								return
+							}
+
 							if !command.ProcessState.Success() {
 								fatal <- err
 
