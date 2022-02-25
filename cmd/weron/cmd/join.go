@@ -189,35 +189,49 @@ var joinCmd = &cobra.Command{
 					return
 				}
 
-				httpTransport := http.DefaultTransport.(*http.Transport).Clone()
-				httpTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
-					viper.GetBool(tlsInsecureFlag),
-					viper.GetString(tlsFingerprintFlag),
-					viper.GetString(tlsHostsFlag),
-					viper.GetString(raddrFlag),
-					func(err error) {
-						fatal <- err
-					},
-					cmd.Printf,
-					func(s string, i ...interface{}) (string, error) {
-						fmt.Printf(s, i...)
+				var conn *websocket.Conn
+				retryWithFingerprint := false
+				for {
+					client := &http.Client{Timeout: viper.GetDuration(timeoutFlag)}
+					if viper.GetString(tlsFingerprintFlag) != "" || retryWithFingerprint || viper.GetBool(tlsInsecureFlag) {
+						httpTransport := http.DefaultTransport.(*http.Transport).Clone()
+						httpTransport.TLSClientConfig = encryption.GetInteractiveTLSConfig(
+							viper.GetBool(tlsInsecureFlag),
+							viper.GetString(tlsFingerprintFlag),
+							viper.GetString(tlsHostsFlag),
+							viper.GetString(raddrFlag),
+							func(err error) {
+								fatal <- err
+							},
+							cmd.Printf,
+							func(s string, i ...interface{}) (string, error) {
+								fmt.Printf(s, i...)
 
-						scanner := bufio.NewScanner(os.Stdin)
-						scanner.Scan()
-						if err := scanner.Err(); err != nil {
-							return "", err
+								scanner := bufio.NewScanner(os.Stdin)
+								scanner.Scan()
+								if err := scanner.Err(); err != nil {
+									return "", err
+								}
+
+								return strings.TrimSuffix(scanner.Text(), "\n"), nil
+							},
+						)
+						client.Transport = httpTransport
+					}
+
+					var err error
+					conn, _, err = websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
+					if err != nil {
+						if strings.Contains(err.Error(), "x509:") {
+							retryWithFingerprint = true
+
+							continue
 						}
 
-						return strings.TrimSuffix(scanner.Text(), "\n"), nil
-					},
-				)
-				client := &http.Client{Transport: httpTransport, Timeout: viper.GetDuration(timeoutFlag)}
+						continue
+					}
 
-				conn, _, err := websocket.Dial(context.Background(), viper.GetString(raddrFlag), &websocket.DialOptions{HTTPClient: client})
-				if err != nil {
-					fatal <- err
-
-					return
+					break
 				}
 
 				mac, err := tap.GetMACAddress()
