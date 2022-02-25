@@ -37,6 +37,7 @@ const (
 	tlsHostsFlag       = "tls-hosts"
 	communityFlag      = "community"
 	deviceNameFlag     = "device-name"
+	canExitFlag        = "can-exit"
 )
 
 var (
@@ -350,10 +351,12 @@ var joinCmd = &cobra.Command{
 							return
 						}
 
-						if !command.ProcessState.Success() {
-							fatal <- err
+						if !viper.GetBool(canExitFlag) {
+							if !command.ProcessState.Success() {
+								fatal <- err
 
-							return
+								return
+							}
 						}
 					}()
 				}
@@ -517,6 +520,7 @@ func init() {
 	joinCmd.PersistentFlags().StringP(tlsHostsFlag, "o", filepath.Join(workingDirectoryDefault, "known_hosts"), "Path to the TLS known_hosts file")
 	joinCmd.PersistentFlags().StringP(communityFlag, "c", "", "Name of the community to join")
 	joinCmd.PersistentFlags().StringP(deviceNameFlag, "d", "", "Name to give the created network interface (if supported by the OS; if not specified, a random name will be chosen)")
+	joinCmd.PersistentFlags().BoolP(canExitFlag, "e", false, "Whether the child command can exit with a non-zero exit code")
 
 	viper.AutomaticEnv()
 
