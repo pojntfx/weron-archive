@@ -43,10 +43,6 @@ func (m *CommunitiesManager) HandleApplication(community string, mac string, con
 		newCommunity = candidate
 	}
 
-	// Abort if MAC address is already in community
-	if _, ok := newCommunity[mac]; ok {
-		return config.ErrDuplicateMACAddress
-	}
 	newCommunity[mac] = conn
 
 	// Apply changes

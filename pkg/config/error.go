@@ -3,7 +3,6 @@ package config
 import "errors"
 
 var (
-	ErrDuplicateMACAddress          = errors.New("duplicate MAC address")
 	ErrConnectionDoesNotExist       = errors.New("connection with this MAC address does not exist")
 	ErrCommunityDoesNotExist        = errors.New("community with this name does not exist")
 	ErrAlreadyApplied               = errors.New("cannot apply multiple times")
