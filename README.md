@@ -23,7 +23,66 @@ It enables you too ...
 
 ## Usage
 
-🚧 This project is a work-in-progress! Instructions will be added as soon as it is usable. 🚧
+### 1. Starting the Signaling Server
+
+The signaling server allows agents to connect to each other by exchanging their connection information. You can either use the publicly hosted signaling server at [wss://weron.herokuapp.com/](wss://weron.herokuapp.com/), or host it yourself:
+
+<details>
+  <summary>Option 1: Starting the signaling server using Podman (recommended)</summary>
+
+Run the following:
+
+```shell
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" -p 15325:15325 --name weron-signaler ghcr.io/pojntfx/weron
+$ sudo podman generate systemd --new weron-signaler | sudo tee /lib/systemd/system/weron-signaler.service
+
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable --now weron-signaler
+```
+
+The signaling service should now be reachable on port `15325` from all network interfaces.
+
+</details>
+
+<details>
+  <summary>Option 2: Starting the signaling server using systemd</summary>
+
+Run the following:
+
+```shell
+$ sudo tee /lib/systemd/system/weron-signaler.service <<'EOT'
+[Unit]
+Description=weron-signaler
+
+[Service]
+ExecStart=/usr/local/bin/weron signal
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable --now weron-signaler
+```
+
+The signaling service should now be reachable on port `15325` from all network interfaces.
+
+</details>
+
+<details>
+  <summary>Option 3: Starting the signaling server natively</summary>
+
+Run the following:
+
+```shell
+$ weron signal
+2022/02/27 18:23:15 Signaler listening on :15325
+2022/02/27 18:23:15 TLS certificate SHA-1 fingerprint: CA:BC:CA:80:C4:14:8B:46:F2:5A:43:D2:8E:BD:40:D7:EC:25:00:9A
+```
+
+The signaling service should now be reachable on port `15325` from all network interfaces.
+
+</details>
 
 ## Installation
 
