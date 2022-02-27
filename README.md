@@ -25,7 +25,7 @@ It enables you too ...
 
 ### 1. Starting the Signaling Server
 
-The signaling server allows agents to connect to each other by exchanging their connection information. You can either use the publicly hosted signaling server at [wss://weron.herokuapp.com/](wss://weron.herokuapp.com/), or host it yourself:
+The signaling server allows agents to connect to each other by exchanging their connection information. You can either use the publicly hosted signaling server at `wss://weron.herokuapp.com/`, or host it yourself:
 
 <details>
   <summary>Option 1: Starting the signaling server using Podman (recommended)</summary>
@@ -33,7 +33,7 @@ The signaling server allows agents to connect to each other by exchanging their 
 Run the following:
 
 ```shell
-$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" -p 15325:15325 --name weron-signaler ghcr.io/pojntfx/weron
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" -p 15325:15325 --name weron-signaler ghcr.io/pojntfx/weron /usr/local/bin/weron signal
 $ sudo podman generate systemd --new weron-signaler | sudo tee /lib/systemd/system/weron-signaler.service
 
 $ sudo systemctl daemon-reload
@@ -81,6 +81,74 @@ $ weron signal
 ```
 
 The signaling service should now be reachable on port `15325` from all network interfaces.
+
+</details>
+
+### 2. Starting the Agent
+
+The agent connects to the signaling server, which it uses to connect to other agents using WebRTC. Please adjust the values below to match your use case. To allocate an IP address, you can replace `weron join` with any of the following:
+
+- `weron join ip addr add fd00::/8 dev` (allocate an IPv6 address statically using `iproute2`)
+- `weron join ip addr add 10.0.0.1/8 dev` (allocate an IPv4 address statically using `iproute2`)
+- `weron join avahi-autoipd` (allocate an IPv4 address dynamically using `avahi-autoipd` (IPv4LL))
+
+<details>
+  <summary>Option 1: Starting the agent using Podman (recommended)</summary>
+
+Run the following:
+
+```shell
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' ghcr.io/pojntfx/weron /usr/local/bin/weron join
+$ sudo podman generate systemd --new weron-agent | sudo tee /lib/systemd/system/weron-agent.service
+
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable --now weron-agent
+```
+
+The agent should now connect to other agents in the community.
+
+</details>
+
+<details>
+  <summary>Option 2: Starting the agent using systemd</summary>
+
+Run the following:
+
+```shell
+$ sudo tee /lib/systemd/system/weron-agent.service <<'EOT'
+[Unit]
+Description=weron-agent
+
+[Service]
+ExecStart=/usr/local/bin/weron join
+Environment=WERON_RADDR='wss://weron.herokuapp.com/'
+Environment=WERON_COMMUNITY='test'
+Environment=WERON_KEY='0123456789101112'
+
+[Install]
+WantedBy=multi-user.target
+EOT
+
+$ sudo systemctl daemon-reload
+$ sudo systemctl enable --now weron-agent
+```
+
+The agent should now connect to other agents in the community.
+
+</details>
+
+<details>
+  <summary>Option 3: Starting the agent natively</summary>
+
+Run the following:
+
+```shell
+$ weron join --raddr wss://weron.herokuapp.com/ --community test --key 0123456789101112
+2022/02/27 19:11:57 Agent connecting to signaler wss://weron.herokuapp.com/
+2022/02/27 19:12:01 Agent connected to signaler wss://weron.herokuapp.com/
+```
+
+The agent should now connect to other agents in the community.
 
 </details>
 
