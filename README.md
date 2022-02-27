@@ -38,6 +38,8 @@ $ sudo podman generate systemd --new weron-signaler | sudo tee /lib/systemd/syst
 
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable --now weron-signaler
+
+$ sudo journalctl -f -u weron-signaler # Get the logs
 ```
 
 The signaling service should now be reachable on port `15325` from all network interfaces.
@@ -63,6 +65,8 @@ EOT
 
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable --now weron-signaler
+
+$ sudo journalctl -f -u weron-signaler # Get the logs
 ```
 
 The signaling service should now be reachable on port `15325` from all network interfaces.
@@ -89,8 +93,8 @@ The signaling service should now be reachable on port `15325` from all network i
 The agent connects to the signaling server, which it uses to connect to other agents using WebRTC. Please adjust the values below to match your use case. To allocate an IP address, you can replace `weron join` with any of the following:
 
 - `weron join ip addr add fd00::/8 dev` (allocate an IPv6 address statically using `iproute2`)
-- `weron join ip addr add 10.0.0.1/8 dev` (allocate an IPv4 address statically using `iproute2`)
-- `weron join avahi-autoipd` (allocate an IPv4 address dynamically using `avahi-autoipd` (IPv4LL))
+- `weron join ip addr add 10.0.0.1/8 dev` (allocate an IPv4 address statically using `iproute2`, run weron using `sudo`)
+- `weron join avahi-autoipd` (allocate an IPv4 address dynamically using `avahi-autoipd` (IPv4LL), run weron using `sudo`)
 
 <details>
   <summary>Option 1: Starting the agent using Podman (recommended)</summary>
@@ -98,11 +102,13 @@ The agent connects to the signaling server, which it uses to connect to other ag
 Run the following:
 
 ```shell
-$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' ghcr.io/pojntfx/weron /usr/local/bin/weron join
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' -e WERON_DEVICE='weron0' ghcr.io/pojntfx/weron /usr/local/bin/weron join
 $ sudo podman generate systemd --new weron-agent | sudo tee /lib/systemd/system/weron-agent.service
 
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable --now weron-agent
+
+$ sudo journalctl -f -u weron-agent # Get the logs
 ```
 
 The agent should now connect to other agents in the community.
@@ -124,6 +130,7 @@ ExecStart=/usr/local/bin/weron join
 Environment=WERON_RADDR='wss://weron.herokuapp.com/'
 Environment=WERON_COMMUNITY='test'
 Environment=WERON_KEY='0123456789101112'
+Environment=WERON_DEVICE='weron0'
 
 [Install]
 WantedBy=multi-user.target
@@ -131,6 +138,8 @@ EOT
 
 $ sudo systemctl daemon-reload
 $ sudo systemctl enable --now weron-agent
+
+$ sudo journalctl -f -u weron-agent # Get the logs
 ```
 
 The agent should now connect to other agents in the community.
@@ -143,7 +152,7 @@ The agent should now connect to other agents in the community.
 Run the following:
 
 ```shell
-$ weron join --raddr wss://weron.herokuapp.com/ --community test --key 0123456789101112
+$ weron join --raddr wss://weron.herokuapp.com/ --community test --key 0123456789101112 --device-name weron0
 2022/02/27 19:11:57 Agent connecting to signaler wss://weron.herokuapp.com/
 2022/02/27 19:12:01 Agent connected to signaler wss://weron.herokuapp.com/
 ```
@@ -151,6 +160,36 @@ $ weron join --raddr wss://weron.herokuapp.com/ --community test --key 012345678
 The agent should now connect to other agents in the community.
 
 </details>
+
+### 3. Testing the Connection
+
+Once you've added other nodes to the community, you can test the layer 2 connectivity between by using `etherecho`:
+
+```shell
+$ go install github.com/mdlayher/ethernet/cmd/etherecho@latest
+# On the first agent
+$ etherecho -i weron0 -m "Hello from the first agent!"
+# On the second agent
+$ etherecho -i weron0 -m "Hello from the second agent!"
+```
+
+If you've assigned an IP address to the opened network interface, you can use `ping` to test connectivity between the agents:
+
+```shell
+# On the first agent; note the `inet` or `inet6` address, which is `fd00::` in this case
+$ ip addr show weron0
+1137: weron0: <BROADCAST,MULTICAST> mtu 1500 qdisc noop state DOWN group default qlen 1000
+    link/ether 8e:ef:3f:08:66:4c brd ff:ff:ff:ff:ff:ff
+    inet6 fd00::/8 scope global tentative
+       valid_lft forever preferred_lft forever
+# On the second agent
+$ ping6 fd00:: # Use `ping` if you chose an IPv4 address
+PING fd00::(fd00::) 56 data bytes
+64 bytes from :fd01::: icmp_seq=1 ttl=64 time=1.090 ms
+64 bytes from :fd01::: icmp_seq=2 ttl=64 time=5.029 ms
+64 bytes from :fd01::: icmp_seq=3 ttl=64 time=2.100 ms
+# ...
+```
 
 ## Installation
 
