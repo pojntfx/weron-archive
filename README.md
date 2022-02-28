@@ -132,7 +132,7 @@ The agent connects to the signaling server, which it uses to connect to other ag
 Run the following:
 
 ```shell
-$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN --device /dev/net/tun:/dev/net/tun --net host -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' -e WERON_DEVICE='weron0' ghcr.io/pojntfx/weron /usr/local/bin/weron join
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN --cap-add NET_RAW --device /dev/net/tun:/dev/net/tun --net host -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' -e WERON_DEVICE='weron0' ghcr.io/pojntfx/weron /usr/local/bin/weron join
 $ sudo podman generate systemd --new weron-agent | sudo tee /lib/systemd/system/weron-agent.service
 
 $ sudo systemctl daemon-reload
