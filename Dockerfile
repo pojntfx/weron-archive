@@ -11,10 +11,10 @@ COPY . .
 RUN make depend
 RUN CGO_ENABLED=0 make
 
-FROM debian:bullseye-slim
+FROM debian:bullseye
 
 RUN apt update
-RUN apt install -y avahi-autoipd ca-certificates
+RUN apt install -y avahi-autoipd
 
 COPY --from=build /build/out/weron /usr/local/bin/weron
 
