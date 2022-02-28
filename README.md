@@ -21,6 +21,36 @@ It enables you too ...
 - **Secure your home network**: By using the inbuilt interactive TLS verification and running the signaling server locally, weron can be used to secure traffic between nodes in a LAN without depending on any external infrastructure.
 - **Join local nodes into a cloud network**: If you run e.g. a Kubernetes cluster with nodes based on cloud instances but also want to join your on-prem nodes into it, you can use weron to create a trusted network for it.
 
+## Installation
+
+### Containerized
+
+You can get the OCI image like so:
+
+```shell
+$ podman pull ghcr.io/pojntfx/weron
+```
+
+### Natively
+
+If you prefer a native installation, static binaries are available on [GitHub releases](https://github.com/pojntfx/weron/releases).
+
+On Linux, you can install them like so:
+
+```shell
+$ curl -L -o /tmp/weron "https://github.com/pojntfx/weron/releases/latest/download/weron.linux-$(uname -m)"
+$ sudo install /tmp/weron /usr/local/bin
+$ sudo setcap cap_net_admin+ep /usr/local/bin/weron # This allows rootless execution
+```
+
+On Windows, the following should work (using PowerShell as administrator; install TAP-Windows first):
+
+```shell
+PS> Invoke-WebRequest https://github.com/pojntfx/weron/releases/latest/download/weron.windows-x86_64.exe -OutFile \Windows\System32\weron.exe
+```
+
+You can find binaries for more operating systems and architectures on [GitHub releases](https://github.com/pojntfx/weron/releases).
+
 ## Usage
 
 ### 1. Starting the Signaling Server
@@ -190,36 +220,6 @@ PING fd00::(fd00::) 56 data bytes
 64 bytes from :fd01::: icmp_seq=3 ttl=64 time=2.100 ms
 # ...
 ```
-
-## Installation
-
-### Containerized
-
-You can get the OCI image like so:
-
-```shell
-$ podman pull ghcr.io/pojntfx/weron
-```
-
-### Natively
-
-If you prefer a native installation, static binaries are available on [GitHub releases](https://github.com/pojntfx/weron/releases).
-
-On Linux, you can install them like so:
-
-```shell
-$ curl -L -o /tmp/weron "https://github.com/pojntfx/weron/releases/latest/download/weron.linux-$(uname -m)"
-$ sudo install /tmp/weron /usr/local/bin
-$ sudo setcap cap_net_admin+ep /usr/local/bin/weron # This allows rootless execution
-```
-
-On Windows, the following should work (using PowerShell as administrator; install TAP-Windows first):
-
-```shell
-PS> Invoke-WebRequest https://github.com/pojntfx/weron/releases/latest/download/weron.windows-x86_64.exe -OutFile \Windows\System32\weron.exe
-```
-
-You can find binaries for more operating systems and architectures on [GitHub releases](https://github.com/pojntfx/weron/releases).
 
 ## Reference
 
