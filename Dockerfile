@@ -11,7 +11,7 @@ COPY . .
 RUN make depend
 RUN CGO_ENABLED=0 make
 
-FROM debian:bullseye
+FROM debian:bullseye-slim
 
 RUN apt update
 RUN apt install -y avahi-autoipd ca-certificates
