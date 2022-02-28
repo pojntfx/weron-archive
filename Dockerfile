@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 make
 FROM debian:bullseye
 
 RUN apt update
-RUN apt install -y avahi-autoipd
+RUN apt install -y avahi-autoipd ca-certificates
 
 COPY --from=build /build/out/weron /usr/local/bin/weron
 
