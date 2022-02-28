@@ -1,4 +1,4 @@
-FROM golang AS build
+FROM golang:bullseye AS build
 
 RUN apt update
 RUN apt install -y make
@@ -11,7 +11,10 @@ COPY . .
 RUN make depend
 RUN CGO_ENABLED=0 make
 
-FROM alpine:edge
+FROM debian:bullseye-slim
+
+RUN apt update
+RUN apt install -y avahi-autoipd ca-certificates
 
 COPY --from=build /build/out/weron /usr/local/bin/weron
 

@@ -124,7 +124,7 @@ The agent connects to the signaling server, which it uses to connect to other ag
 
 - `weron join ip addr add fd00::/8 dev` (allocate an IPv6 address statically using `iproute2`)
 - `weron join ip addr add 10.0.0.1/8 dev` (allocate an IPv4 address statically using `iproute2`, run weron using `sudo`)
-- `weron join avahi-autoipd` (allocate an IPv4 address dynamically using `avahi-autoipd` (IPv4LL), run weron using `sudo`)
+- `weron join -e=true avahi-autoipd` (allocate an IPv4 address dynamically using `avahi-autoipd` (IPv4LL), run weron using `sudo`)
 
 <details>
   <summary>Option 1: Starting the agent using Podman (recommended)</summary>
@@ -132,7 +132,7 @@ The agent connects to the signaling server, which it uses to connect to other ag
 Run the following:
 
 ```shell
-$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' -e WERON_DEVICE='weron0' ghcr.io/pojntfx/weron /usr/local/bin/weron join
+$ sudo podman run -d --restart=always --label "io.containers.autoupdate=image" --name weron-agent --cap-add NET_ADMIN --device /dev/net/tun:/dev/net/tun --net host -e WERON_RADDR='wss://weron.herokuapp.com/' -e WERON_COMMUNITY='test' -e WERON_KEY='0123456789101112' -e WERON_DEVICE='weron0' ghcr.io/pojntfx/weron /usr/local/bin/weron join
 $ sudo podman generate systemd --new weron-agent | sudo tee /lib/systemd/system/weron-agent.service
 
 $ sudo systemctl daemon-reload
